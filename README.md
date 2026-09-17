@@ -136,14 +136,3 @@ nmr_catalog.db
 PyCat_NMR_Catalog.csv
 NMR_Library/
 ```
-
-## Privacy
-
-The current version stores its database, metadata, notes, and documents locally. It does not upload papers or catalog information to an online service.
-
-## Planned development
-
-- Optional offline question answering for selected papers and books
-- OCR support for scanned documents
-- Equation and experimental-parameter extraction
-- Packaged installers for Windows, macOS, and Linux
