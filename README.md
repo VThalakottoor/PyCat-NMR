@@ -33,14 +33,14 @@ Uploaded files are organized using the following structure:
 
 ```text
 NMR_Library/
-â””â”€â”€ Section/
-    â””â”€â”€ Subsection/
-        â””â”€â”€ Corresponding author/
-            â””â”€â”€ Paper or book title/
-                â”œâ”€â”€ paper.pdf
-                â”œâ”€â”€ reference.bib
-                â”œâ”€â”€ Notes.txt
-                â””â”€â”€ attached-images
+└── Section/
+    └── Subsection/
+        └── Corresponding author/
+            └── Paper or book title/
+                ├── paper.pdf
+                ├── reference.bib
+                ├── Notes.txt
+                └── attached-images
 ```
 
 ## Requirements
@@ -121,9 +121,9 @@ The catalog supports free-text searching and field-specific searching. The Secti
 
 PyCat NMR creates the following files beside the program:
 
-- `nmr_catalog.db` â€” primary SQLite database
-- `PyCat_NMR_Catalog.csv` â€” automatically synchronized catalog table
-- `NMR_Library/` â€” default document library
+- `nmr_catalog.db` — primary SQLite database
+- `PyCat_NMR_Catalog.csv` — automatically synchronized catalog table
+- `NMR_Library/` — default document library
 
 The `.db` file is a binary SQLite database and should not be opened or edited with a normal text editor.
 
