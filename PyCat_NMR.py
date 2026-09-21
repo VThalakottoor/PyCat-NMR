@@ -1,4 +1,4 @@
-r"""PyCat NMR — Python Catalog for NMR papers, books, theses, images, and equations.
+r"""PyCat NMR — Python Catalog for NMR papers, books, manuals, theses, notes, images, and equations.
 
 Author: Vineeth Francis Thalakottoor (vineeth.thalakottoor@cea.fr)
 
@@ -44,12 +44,15 @@ except ImportError:
 
 _MATH_RENDER_LOCK = threading.RLock()
 
-CATEGORY_FOLDERS = {"Paper": "Papers", "Book": "Books", "Equation": "Equations", "Image": "Images", "Thesis": "Thesis"}
+CATEGORY_FOLDERS = {
+    "Paper": "Papers", "Book": "Books", "Manual": "Manuals", "Thesis": "Thesis",
+    "Note": "Notes", "Image": "Images", "Equation": "Equations",
+}
 
-ITEM_TYPES = ("Paper", "Book", "Thesis", "Image", "Equation")
+ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Note", "Image", "Equation")
 
 
-APP_VERSION = "16"
+APP_VERSION = "18"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -224,7 +227,7 @@ class NMRCatalog(CatalogWindow):
         form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfigure(form_window, width=e.width))
         self.equation_panel = ttk.LabelFrame(editor, text="Equation editor", padding=12)
         editor.add(self.equation_panel, weight=2)
-        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, theses, images, and equations", padding=8)
+        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, notes, images, and equations", padding=8)
         table_frame.pack(fill="both", expand=True)
 
         self.fields = {}
@@ -296,6 +299,21 @@ class NMRCatalog(CatalogWindow):
                 paste_button = ttk.Button(actions, text="Paste…", command=self.paste_bibtex_attachment)
                 paste_button.pack(side="left", padx=(4, 0))
                 self.attachment_buttons["bibtex_paste"] = paste_button
+                drop_text = "Drop .bib here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
+                self.bibtex_drop_target = ttk.Label(actions, text=drop_text, relief="groove", padding=(8, 6))
+                self.bibtex_drop_target.pack(side="left", padx=(5, 0))
+                if DND_AVAILABLE:
+                    for target in (self.bibtex_drop_target, self.field_widgets["bibtex_path"]):
+                        target.drop_target_register(DND_FILES)
+                        target.dnd_bind("<<Drop>>", self.drop_bibtex)
+            if key == "image_paths":
+                drop_text = "Drop images here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
+                self.images_drop_target = ttk.Label(actions, text=drop_text, relief="groove", padding=(8, 6))
+                self.images_drop_target.pack(side="left", padx=(5, 0))
+                if DND_AVAILABLE:
+                    for target in (self.images_drop_target, self.field_widgets["image_paths"]):
+                        target.drop_target_register(DND_FILES)
+                        target.dnd_bind("<<Drop>>", self.drop_images)
         ttk.Label(form, text="Notes").grid(row=16, column=0, sticky="nw")
         self.notes = tk.Text(form, height=7, width=35, wrap="word")
         self.notes.grid(row=16, column=1, columnspan=2, sticky="nsew")
@@ -501,7 +519,7 @@ class NMRCatalog(CatalogWindow):
     def update_type_controls(self, *_args):
         self._preview_generation += 1
         kind = self.fields["item_type"].get()
-        compact = kind in ("Equation", "Image")
+        compact = kind in ("Equation", "Image", "Note")
         for key, widget in self.field_widgets.items():
             if key == "item_type":
                 widget.configure(state="readonly")
@@ -525,8 +543,18 @@ class NMRCatalog(CatalogWindow):
                 text=("Drop supplementary files here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
                 state="normal" if not compact else "disabled",
             )
+        if hasattr(self, "bibtex_drop_target"):
+            self.bibtex_drop_target.configure(
+                text=("Drop .bib here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
+                state="normal" if not compact else "disabled",
+            )
+        if hasattr(self, "images_drop_target"):
+            self.images_drop_target.configure(
+                text=("Drop images here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
+                state="normal" if (not compact or kind == "Image") else "disabled",
+            )
         self.notes.configure(state="normal")
-        equation_enabled = kind in ("Paper", "Book", "Thesis", "Equation")
+        equation_enabled = kind in ("Paper", "Book", "Manual", "Thesis", "Note", "Equation")
         self.equation_text.configure(state="normal" if equation_enabled else "disabled")
         self.renderer_combo.configure(state="readonly" if equation_enabled else "disabled")
         self.preview_button.configure(state="normal" if equation_enabled else "disabled")
@@ -699,7 +727,7 @@ class NMRCatalog(CatalogWindow):
             return
         future = self._pdf_future
         self._pdf_future = None
-        self.save_pdf_button.configure(state="normal" if self.fields["item_type"].get() in ("Paper", "Book", "Thesis", "Equation") else "disabled")
+        self.save_pdf_button.configure(state="normal" if self.fields["item_type"].get() in ("Paper", "Book", "Manual", "Thesis", "Note", "Equation") else "disabled")
         try:
             path = future.result()
             self.fields["equation_pdf_path"].set(self.portable_stored_path(path))
@@ -718,8 +746,8 @@ class NMRCatalog(CatalogWindow):
 
     def open_current_equation_pdf(self):
         """Open the separate equation PDF attached to the form being edited."""
-        if self.fields["item_type"].get() not in ("Paper", "Book", "Thesis", "Equation"):
-            messagebox.showinfo(APP_TITLE, "LaTeX PDFs are available for papers, books, theses, and equations.")
+        if self.fields["item_type"].get() not in ("Paper", "Book", "Manual", "Thesis", "Note", "Equation"):
+            messagebox.showinfo(APP_TITLE, "LaTeX PDFs are available for papers, books, manuals, theses, notes, and equations.")
             return
         stored = self.fields["equation_pdf_path"].get().strip()
         path = self.resolve_stored_path(stored)
@@ -746,7 +774,7 @@ class NMRCatalog(CatalogWindow):
             return
         entry_id = int(selection[0])
         row = self.conn.execute("SELECT * FROM literature WHERE id=?", (entry_id,)).fetchone()
-        if row["item_type"] not in ("Paper", "Book", "Thesis", "Equation"):
+        if row["item_type"] not in ("Paper", "Book", "Manual", "Thesis", "Note", "Equation"):
             messagebox.showinfo(APP_TITLE, "The selected entry does not support a LaTeX PDF.")
             return
         stored = (row["equation_pdf_path"] or "").strip()
@@ -786,6 +814,9 @@ class NMRCatalog(CatalogWindow):
         if data["item_type"] == "Equation" and not data["equation_latex"]:
             messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
             return
+        if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"]):
+            messagebox.showwarning(APP_TITLE, "Please enter a note or an equation.")
+            return
         if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
             messagebox.showwarning(APP_TITLE, "Please select an image using Images…")
             return
@@ -815,6 +846,9 @@ class NMRCatalog(CatalogWindow):
             return
         if data["item_type"] == "Equation" and not data["equation_latex"]:
             messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
+            return
+        if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"]):
+            messagebox.showwarning(APP_TITLE, "Please enter a note or an equation.")
             return
         if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
             messagebox.showwarning(APP_TITLE, "Please select an image using Images…")
@@ -961,8 +995,8 @@ class NMRCatalog(CatalogWindow):
         if os.path.splitext(path)[1].lower() != ".pdf":
             messagebox.showwarning(APP_TITLE, "Only PDF files can be attached here.")
             return False
-        if self.fields["item_type"].get() in ("Equation", "Image"):
-            messagebox.showinfo(APP_TITLE, "PDF attachments are available for papers, books, and theses.")
+        if self.fields["item_type"].get() in ("Equation", "Image", "Note"):
+            messagebox.showinfo(APP_TITLE, "PDF attachments are available for papers, books, manuals, and theses.")
             return False
         if not self.fields["title"].get().strip():
             messagebox.showinfo(APP_TITLE, "Enter the title before attaching its PDF.")
@@ -1263,17 +1297,44 @@ class NMRCatalog(CatalogWindow):
     def browse_bibtex_attachment(self):
         path = filedialog.askopenfilename(title="Attach BibTeX", filetypes=(("BibTeX files", "*.bib"), ("All files", "*.*")))
         if path:
-            try:
-                self.fields["bibtex_path"].set(self.store_document(path, "BibTeX"))
-                with open(path, encoding="utf-8-sig", errors="replace") as file:
-                    bibtex_text = file.read()
-                if messagebox.askyesno(
-                    APP_TITLE, "BibTeX file attached. Fill the form from its metadata now?",
-                    default=messagebox.YES,
-                ):
-                    self.fill_form_from_bibtex_text(bibtex_text)
-            except OSError as error:
-                messagebox.showerror(APP_TITLE, f"Could not store the BibTeX file:\n{error}")
+            self.attach_bibtex_file(path)
+
+    def attach_bibtex_file(self, path):
+        """Validate, attach and optionally parse one local BibTeX file."""
+        path = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isfile(path):
+            messagebox.showwarning(APP_TITLE, "The BibTeX item is not a file.")
+            return False
+        if os.path.splitext(path)[1].lower() != ".bib":
+            messagebox.showwarning(APP_TITLE, "Only .bib files can be attached as BibTeX.")
+            return False
+        try:
+            self.fields["bibtex_path"].set(self.store_document(path, "BibTeX"))
+            with open(path, encoding="utf-8-sig", errors="replace") as file:
+                bibtex_text = file.read()
+            if messagebox.askyesno(
+                APP_TITLE, "BibTeX file attached. Fill the form from its metadata now?",
+                default=messagebox.YES,
+            ):
+                self.fill_form_from_bibtex_text(bibtex_text)
+            return True
+        except OSError as error:
+            messagebox.showerror(APP_TITLE, f"Could not store the BibTeX file:\n{error}")
+            return False
+
+    def drop_bibtex(self, event):
+        """Accept the first .bib file from a desktop file-manager drop."""
+        try:
+            paths = list(self.tk.splitlist(event.data))
+        except (tk.TclError, TypeError):
+            paths = []
+        if not paths:
+            messagebox.showwarning(APP_TITLE, "No BibTeX file was found in the drop.")
+            return "break"
+        if len(paths) > 1:
+            messagebox.showinfo(APP_TITLE, "Only one BibTeX attachment is supported. Using the first dropped file.")
+        self.attach_bibtex_file(paths[0])
+        return "break"
 
     def browse_supplementary(self):
         paths = filedialog.askopenfilenames(
@@ -1324,20 +1385,54 @@ class NMRCatalog(CatalogWindow):
 
     def browse_images(self):
         paths = filedialog.askopenfilenames(
-            title="Attach images", filetypes=(("Image files", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"), ("All files", "*.*"))
+            title="Attach images", filetypes=(("Image files", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp"), ("All files", "*.*"))
         )
-        if not paths:
-            return
+        if paths:
+            self.attach_image_files(paths)
+
+    def attach_image_files(self, paths):
+        """Validate and attach one or more images without discarding existing ones."""
+        extensions = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
+        valid = []
+        skipped = []
+        for path in paths:
+            path = os.path.abspath(os.path.expanduser(path))
+            if os.path.isfile(path) and os.path.splitext(path)[1].lower() in extensions:
+                valid.append(path)
+            else:
+                skipped.append(path)
+        if not valid:
+            messagebox.showwarning(APP_TITLE, "No supported image files were selected or dropped.")
+            return 0
         try:
-            self.ensure_compact_title(paths[0])
-            stored = [self.store_document(path, "Image") for path in paths]
+            self.ensure_compact_title(valid[0])
+            stored = [self.store_document(path, "Image") for path in valid]
             existing = [p for p in self.fields["image_paths"].get().split("; ") if p]
             self.fields["image_paths"].set("; ".join(dict.fromkeys([*existing, *stored])))
+            if skipped:
+                messagebox.showinfo(
+                    APP_TITLE,
+                    f"Added {len(stored)} image(s). Skipped {len(skipped)} unsupported item(s).",
+                )
+            return len(stored)
         except OSError as error:
             messagebox.showerror(APP_TITLE, f"Could not store the images:\n{error}")
+            return 0
+
+    def drop_images(self, event):
+        """Accept multiple supported images from a desktop file-manager drop."""
+        try:
+            paths = list(self.tk.splitlist(event.data))
+        except (tk.TclError, TypeError):
+            paths = []
+        if not paths:
+            messagebox.showwarning(APP_TITLE, "No image files were found in the drop.")
+            return "break"
+        self.attach_image_files(paths)
+        return "break"
 
     def open_selected_file(self):
-        if self.fields["item_type"].get() == "Equation":
+        if self.fields["item_type"].get() in ("Equation", "Note"):
             self.tabs.select(1)
             self.preview_equation(compile_full=True)
             self.equation_text.focus_set()
@@ -1546,7 +1641,9 @@ class NMRCatalog(CatalogWindow):
     def bibtex_form_values(entry_type, bib):
         """Map one parsed BibTeX entry to PyCat form fields."""
         entry_type = (entry_type or "").lower()
-        if entry_type in ("book", "inbook", "booklet", "proceedings", "manual"):
+        if entry_type == "manual":
+            item_type = "Manual"
+        elif entry_type in ("book", "inbook", "booklet", "proceedings"):
             item_type = "Book"
         elif entry_type in ("phdthesis", "mastersthesis", "thesis"):
             item_type = "Thesis"
@@ -1694,7 +1791,7 @@ class NMRCatalog(CatalogWindow):
                     bib.get("correspondingauthor") or bib.get("corresponding_author")
                     or bib.get("corresponding-author") or ""
                 )
-                item_type = "Book" if entry_type in ("book", "inbook") else "Thesis" if entry_type in ("phdthesis", "mastersthesis", "thesis") else "Paper"
+                item_type = "Manual" if entry_type == "manual" else "Book" if entry_type in ("book", "inbook") else "Thesis" if entry_type in ("phdthesis", "mastersthesis", "thesis") else "Paper"
                 self.fields["item_type"].set(item_type)
                 self.fields["authors"].set(author_text.replace(" and ", "; "))
                 self.fields["section"].set(section)

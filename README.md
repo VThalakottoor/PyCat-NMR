@@ -1,7 +1,7 @@
-# PyCat NMR v16
+# PyCat NMR v18
 
-PyCat NMR is a desktop catalog for organizing NMR papers, books, theses,
-images, equations, notes, BibTeX records, and supplementary material. It uses
+PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
+theses, notes, images, equations, BibTeX records, and supplementary material. It uses
 Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
 **Author:** Vineeth Francis Thalakottoor  
@@ -9,15 +9,16 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
 ## Features
 
-- Five entry types: **Paper**, **Book**, **Thesis**, **Image**, and **Equation**.
+- Seven entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Note**,
+  **Image**, and **Equation**.
 - Search by title, author, keyword, section, subsection, or all fields.
 - Filters for entry type, section, and subsection.
-- Attach a local PDF by file selection or drag-and-drop, plus multiple
-  supplementary files, BibTeX, and images.
+- Attach a local PDF, supplementary files, BibTeX, and images by file selection
+  or drag-and-drop.
 - Attach BibTeX from an existing `.bib` file or paste BibTeX directly into
   PyCat.
 - Editable notes for every entry type, also saved as `Notes.txt`.
-- Equation editor for Papers, Books, Theses, and Equation entries.
+- Equation editor for Papers, Books, Manuals, Theses, Notes, and Equation entries.
 - Quick equation preview, full LaTeX preview, mixed text and equations, and PDF
   export.
 - Separate storage and opening of the main literature PDF and the exported
@@ -32,14 +33,16 @@ Keep the complete PyCat directory together:
 
 ```text
 PyCat/
-├── PyCat_NMR_v16.py
-├── README_v16.md
+├── PyCat_NMR_v18.py
+├── README_v18.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
 └── NMR_Library/
     ├── Papers/
     ├── Books/
     ├── Thesis/
+    ├── Manuals/
+    ├── Notes/
     ├── Images/
     └── Equations/
 ```
@@ -70,7 +73,8 @@ uses the first author in **Authors**. If both fields are empty, it uses
 - Tkinter for the desktop interface.
 - Matplotlib for quick equation preview.
 - Pillow for full LaTeX preview image processing.
-- Optional: tkinterdnd2 for dragging PDF files from the desktop into PyCat.
+- Optional: tkinterdnd2 for dragging PDFs, supplementary files, BibTeX, and
+  images from the desktop into PyCat.
 - Optional: a LaTeX distribution and Poppler for Full LaTeX preview and PDF
   export in `Text + equations` or `Full LaTeX` mode.
 
@@ -131,7 +135,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 7. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v16.py
+   python PyCat_NMR_v18.py
    ```
 
 For later sessions:
@@ -139,7 +143,7 @@ For later sessions:
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
 source ~/venv/pycat/bin/activate
-python PyCat_NMR_v16.py
+python PyCat_NMR_v18.py
 ```
 
 Leave the virtual environment with:
@@ -191,7 +195,7 @@ deactivate
 7. Run PyCat:
 
    ```powershell
-   python PyCat_NMR_v16.py
+   python PyCat_NMR_v18.py
    ```
 
 If PowerShell blocks activation, either use Command Prompt with
@@ -199,7 +203,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v16.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v18.py
 ```
 
 ## macOS installation
@@ -240,7 +244,7 @@ interpreter directly:
 6. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v16.py
+   python PyCat_NMR_v18.py
    ```
 
 ## Important virtual-environment rule
@@ -256,7 +260,7 @@ If PyCat is on a USB drive, a convenient approach is:
 ```text
 Linux/macOS internal drive: ~/venv/pycat
 Windows internal drive:     %USERPROFILE%\venv\pycat
-USB drive: PyCat_NMR_v16.py, database, CSV, and NMR_Library
+USB drive: PyCat_NMR_v18.py, database, CSV, and NMR_Library
 ```
 
 You do not have to activate a virtual environment if you call its Python
@@ -289,7 +293,7 @@ at that moment.
 ## Adding an entry
 
 1. Open **Upload / Edit**.
-2. Select Paper, Book, Thesis, Image, or Equation.
+2. Select Paper, Book, Manual, Thesis, Note, Image, or Equation.
 3. Enter the title, section, and subsection.
 4. For literature, complete the authors, corresponding author, year, source,
    DOI/ISBN, and keywords as available.
@@ -298,8 +302,11 @@ at that moment.
 6. Enter notes or equation content if required.
 7. Click **Add**.
 
-For Image and Equation entries, fields not relevant to that type are disabled.
-If an Image or Equation title is left empty, PyCat generates one automatically.
+Manual uses the same full metadata and attachment controls as Paper. For Note,
+only Title, Section, Subsection, Notes, and the equation editor remain active;
+enter at least a note or an equation. Image and Equation also disable fields
+that are not relevant. If an Image or Equation title is left empty, PyCat
+generates one automatically.
 
 ## Editing or deleting an entry
 
@@ -333,22 +340,26 @@ automatically.
 There are two attachment methods:
 
 - **BibTeX...** selects an existing `.bib` file.
+- **Drop .bib here** accepts one `.bib` file dragged from the operating
+  system's file manager. If several files are dropped, PyCat uses the first.
 - **Paste...** opens an editor where BibTeX can be pasted and saved as a `.bib`
   attachment.
 
-After either method, click **Add** or **Update** to save the catalog entry.
+After selecting or dropping a `.bib` file, PyCat asks whether its metadata
+should fill the form. After any attachment method, click **Add** or **Update**
+to save the catalog entry.
 **Import BibTeX** can create multiple catalog entries from a BibTeX database;
 incomplete or duplicate entries are skipped.
 
 ## Notes
 
-Notes are available for all five entry types. PyCat stores the notes in the
+Notes are available for all seven entry types. PyCat stores the notes in the
 SQLite catalog and writes `Notes.txt` into the entry folder. Use **Open Notes**
 to open that file in the operating system's default text editor.
 
 ## Equations, text, previews, and PDF export
 
-The equation editor is available for Papers, Books, Theses, and Equation
+The equation editor is available for Papers, Books, Manuals, Theses, Notes, and Equation
 entries. It provides three modes:
 
 ### Text + equations
@@ -379,13 +390,13 @@ document. This mode requires `pdflatex`, `pdftoppm`, and Pillow.
 Click **Preview** to render the content. Click **Save PDF...** to export
 `Title-Equations.pdf`; the save dialog starts in the entry's own folder. PyCat
 stores this as a separate LaTeX PDF attachment, without replacing the paper,
-book, or thesis PDF. Click **Open PDF** in the equation editor to open the
+book, manual, or thesis PDF. Click **Open PDF** in the equation editor to open the
 current form's exported PDF. Under **Search Library**, select an entry and click
 **Open LaTeX PDF** to open it independently of **Open / View**, which opens the
 main literature PDF. Click **Add** or **Update** after exporting to retain the
 editable source and the LaTeX PDF location in the catalog.
 
-For files exported by an older PyCat version, v16 also checks the entry folder
+For files exported by an older PyCat version, v18 also checks the entry folder
 for the standard `Title-Equations.pdf` filename and records it automatically
 when opened.
 
@@ -410,7 +421,10 @@ python -m pip install tkinterdnd2
 
 ## Images
 
-Use **Images...** to attach one or several images.
+Use **Images...** to attach one or several images, or drag multiple image files
+onto **Drop images here**. PNG, JPEG, TIFF, BMP, GIF, and WebP are supported.
+Additional drops preserve images that are already attached, and duplicate
+stored locations are not added twice.
 **Open Images** launches saved images in the operating system's default image
 viewer.
 
