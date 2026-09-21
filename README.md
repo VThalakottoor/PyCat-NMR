@@ -1,4 +1,4 @@
-# PyCat NMR
+# PyCat NMR v16
 
 PyCat NMR is a desktop catalog for organizing NMR papers, books, theses,
 images, equations, notes, BibTeX records, and supplementary material. It uses
@@ -20,6 +20,8 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 - Equation editor for Papers, Books, Theses, and Equation entries.
 - Quick equation preview, full LaTeX preview, mixed text and equations, and PDF
   export.
+- Separate storage and opening of the main literature PDF and the exported
+  LaTeX/equation PDF.
 - Automatic CSV synchronization in `PyCat_NMR_Catalog.csv`.
 - Portable relative paths for moving the complete PyCat folder between
   computers or using it from a USB drive.
@@ -30,8 +32,8 @@ Keep the complete PyCat directory together:
 
 ```text
 PyCat/
-├── PyCat_NMR.py
-├── PyCat_NMR_README.md
+├── PyCat_NMR_v16.py
+├── README_v16.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
 └── NMR_Library/
@@ -129,7 +131,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 7. Run PyCat:
 
    ```bash
-   python PyCat_NMR.py
+   python PyCat_NMR_v16.py
    ```
 
 For later sessions:
@@ -137,7 +139,7 @@ For later sessions:
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
 source ~/venv/pycat/bin/activate
-python PyCat_NMR.py
+python PyCat_NMR_v16.py
 ```
 
 Leave the virtual environment with:
@@ -189,7 +191,7 @@ deactivate
 7. Run PyCat:
 
    ```powershell
-   python PyCat_NMR.py
+   python PyCat_NMR_v16.py
    ```
 
 If PowerShell blocks activation, either use Command Prompt with
@@ -197,7 +199,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v16.py
 ```
 
 ## macOS installation
@@ -238,7 +240,7 @@ interpreter directly:
 6. Run PyCat:
 
    ```bash
-   python PyCat_NMR.py
+   python PyCat_NMR_v16.py
    ```
 
 ## Important virtual-environment rule
@@ -254,7 +256,7 @@ If PyCat is on a USB drive, a convenient approach is:
 ```text
 Linux/macOS internal drive: ~/venv/pycat
 Windows internal drive:     %USERPROFILE%\venv\pycat
-USB drive: PyCat_NMR.py, database, CSV, and NMR_Library
+USB drive: PyCat_NMR_v16.py, database, CSV, and NMR_Library
 ```
 
 You do not have to activate a virtual environment if you call its Python
@@ -375,8 +377,17 @@ Use environments such as `align`, matrices, cases, or a complete LaTeX
 document. This mode requires `pdflatex`, `pdftoppm`, and Pillow.
 
 Click **Preview** to render the content. Click **Save PDF...** to export
-`Title-Equations.pdf`; the save dialog starts in the entry's own folder. Click
-**Add** or **Update** to retain the editable source in the catalog.
+`Title-Equations.pdf`; the save dialog starts in the entry's own folder. PyCat
+stores this as a separate LaTeX PDF attachment, without replacing the paper,
+book, or thesis PDF. Click **Open PDF** in the equation editor to open the
+current form's exported PDF. Under **Search Library**, select an entry and click
+**Open LaTeX PDF** to open it independently of **Open / View**, which opens the
+main literature PDF. Click **Add** or **Update** after exporting to retain the
+editable source and the LaTeX PDF location in the catalog.
+
+For files exported by an older PyCat version, v16 also checks the entry folder
+for the standard `Title-Equations.pdf` filename and records it automatically
+when opened.
 
 ## PDF attachment and drag-and-drop
 

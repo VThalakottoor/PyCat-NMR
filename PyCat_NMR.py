@@ -49,7 +49,7 @@ CATEGORY_FOLDERS = {"Paper": "Papers", "Book": "Books", "Equation": "Equations",
 ITEM_TYPES = ("Paper", "Book", "Thesis", "Image", "Equation")
 
 
-APP_VERSION = "15"
+APP_VERSION = "16"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -121,6 +121,9 @@ class NMRCatalog(CatalogWindow):
                 image_paths TEXT,
                 notes_path TEXT,
                 notes TEXT,
+                equation_latex TEXT,
+                equation_renderer TEXT,
+                equation_pdf_path TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -130,7 +133,8 @@ class NMRCatalog(CatalogWindow):
         migrations = {
             "section": "TEXT", "subsection": "TEXT", "corresponding_author": "TEXT",
             "author_email": "TEXT", "supplementary_paths": "TEXT", "bibtex_path": "TEXT",
-            "image_paths": "TEXT", "notes_path": "TEXT", "equation_latex": "TEXT", "equation_renderer": "TEXT",
+            "image_paths": "TEXT", "notes_path": "TEXT", "equation_latex": "TEXT",
+            "equation_renderer": "TEXT", "equation_pdf_path": "TEXT",
         }
         for column, data_type in migrations.items():
             if column not in existing:
@@ -255,6 +259,10 @@ class NMRCatalog(CatalogWindow):
             self.field_widgets[key] = widget
             widget.grid(row=row, column=1, sticky="ew", pady=(0, 8))
 
+        # Stored separately from the main paper PDF. It is managed through the
+        # equation editor and the dedicated Open LaTeX PDF buttons.
+        self.fields["equation_pdf_path"] = tk.StringVar()
+
         for row, key, label, command in (
             (12, "file_link", "Select PDF…", self.browse_file),
             (13, "supplementary_paths", "Supplement…", self.browse_supplementary),
@@ -334,6 +342,7 @@ class NMRCatalog(CatalogWindow):
         footer_more = ttk.Frame(table_frame)
         footer_more.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 0))
         ttk.Button(footer_more, text="Open Images", command=self.open_images).pack(side="left")
+        ttk.Button(footer_more, text="Open LaTeX PDF", command=self.open_selected_equation_pdf).pack(side="left", padx=5)
         ttk.Button(footer_more, text="Open Entry Folder", command=self.open_entry_folder).pack(side="right", padx=5)
         ttk.Button(footer_more, text="Edit Selected", command=lambda: self.tabs.select(1)).pack(side="right")
         ttk.Button(footer_more, text="Import BibTeX", command=self.import_bibtex).pack(side="right", padx=5)
@@ -363,6 +372,8 @@ class NMRCatalog(CatalogWindow):
         self.example_button.pack(side="left", padx=4)
         self.save_pdf_button = ttk.Button(actions, text="Save PDF…", command=self.save_equation_pdf)
         self.save_pdf_button.pack(side="left", padx=4)
+        self.open_latex_pdf_button = ttk.Button(actions, text="Open PDF", command=self.open_current_equation_pdf)
+        self.open_latex_pdf_button.pack(side="left")
         self.equation_status = ttk.Label(panel, text="", wraplength=330)
         self.equation_status.pack(fill="x", pady=(0, 8))
         preview = ttk.Frame(panel)
@@ -521,6 +532,7 @@ class NMRCatalog(CatalogWindow):
         self.preview_button.configure(state="normal" if equation_enabled else "disabled")
         self.example_button.configure(state="normal" if equation_enabled else "disabled")
         self.save_pdf_button.configure(state="normal" if equation_enabled and self._pdf_future is None else "disabled")
+        self.open_latex_pdf_button.configure(state="normal" if equation_enabled else "disabled")
 
     def ensure_compact_title(self, image_path=None):
         kind = self.fields["item_type"].get()
@@ -690,11 +702,72 @@ class NMRCatalog(CatalogWindow):
         self.save_pdf_button.configure(state="normal" if self.fields["item_type"].get() in ("Paper", "Book", "Thesis", "Equation") else "disabled")
         try:
             path = future.result()
+            self.fields["equation_pdf_path"].set(self.portable_stored_path(path))
             self.equation_status.configure(text="PDF saved. Use Add or Update to save the editable catalog entry.", foreground="#27632a")
-            messagebox.showinfo(APP_TITLE, "PDF saved:\n" + path)
+            messagebox.showinfo(APP_TITLE, "LaTeX PDF saved and attached separately:\n" + path)
         except Exception as error:
             self.equation_status.configure(text="PDF export failed.", foreground="#a04020")
             messagebox.showerror(APP_TITLE, "Could not save the PDF:\n" + str(error))
+
+    def expected_equation_pdf(self, section, subsection, corresponding_author, authors, title, item_type):
+        """Return the standard equation-PDF path used by older and current entries."""
+        folder = self.entry_folder_for(
+            section, subsection, self.folder_author(corresponding_author, authors), title, item_type,
+        )
+        return os.path.join(folder, self.safe_name(title, "Equation") + "-Equations.pdf")
+
+    def open_current_equation_pdf(self):
+        """Open the separate equation PDF attached to the form being edited."""
+        if self.fields["item_type"].get() not in ("Paper", "Book", "Thesis", "Equation"):
+            messagebox.showinfo(APP_TITLE, "LaTeX PDFs are available for papers, books, theses, and equations.")
+            return
+        stored = self.fields["equation_pdf_path"].get().strip()
+        path = self.resolve_stored_path(stored)
+        if not stored or not os.path.isfile(path):
+            path = self.expected_equation_pdf(
+                self.fields["section"].get(), self.fields["subsection"].get(),
+                self.fields["corresponding_author"].get(), self.fields["authors"].get(),
+                self.fields["title"].get(), self.fields["item_type"].get(),
+            )
+        if not os.path.isfile(path):
+            messagebox.showinfo(APP_TITLE, "No saved LaTeX PDF was found. Use Save PDF… first.")
+            return
+        self.fields["equation_pdf_path"].set(self.portable_stored_path(path))
+        try:
+            open_with_system(path)
+        except Exception as error:
+            messagebox.showerror(APP_TITLE, f"Could not open the LaTeX PDF:\n{error}")
+
+    def open_selected_equation_pdf(self):
+        """Open the equation PDF for the selected catalog record, independently of its main PDF."""
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo(APP_TITLE, "Select an entry first.")
+            return
+        entry_id = int(selection[0])
+        row = self.conn.execute("SELECT * FROM literature WHERE id=?", (entry_id,)).fetchone()
+        if row["item_type"] not in ("Paper", "Book", "Thesis", "Equation"):
+            messagebox.showinfo(APP_TITLE, "The selected entry does not support a LaTeX PDF.")
+            return
+        stored = (row["equation_pdf_path"] or "").strip()
+        path = self.resolve_stored_path(stored)
+        if not stored or not os.path.isfile(path):
+            path = self.expected_equation_pdf(
+                row["section"], row["subsection"], row["corresponding_author"],
+                row["authors"], row["title"], row["item_type"],
+            )
+        if not os.path.isfile(path):
+            messagebox.showinfo(APP_TITLE, "This entry has no saved LaTeX PDF.")
+            return
+        portable = self.portable_stored_path(path)
+        if portable != stored:
+            self.conn.execute("UPDATE literature SET equation_pdf_path=? WHERE id=?", (portable, entry_id))
+            self.conn.commit()
+            self.sync_csv()
+        try:
+            open_with_system(path)
+        except Exception as error:
+            messagebox.showerror(APP_TITLE, f"Could not open the LaTeX PDF:\n{error}")
 
     def values_from_form(self):
         values = {name: variable.get().strip() for name, variable in self.fields.items()}
@@ -957,7 +1030,7 @@ class NMRCatalog(CatalogWindow):
 
     def make_existing_paths_portable(self):
         """Convert already-local absolute paths without moving or deleting files."""
-        columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path")
+        columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
         rows = self.conn.execute("SELECT id, " + ", ".join(columns) + " FROM literature").fetchall()
         with self.conn:
             for row in rows:
@@ -1051,7 +1124,7 @@ class NMRCatalog(CatalogWindow):
         folder = self.entry_folder_for(data.get("section"), data.get("subsection"),
                                       author, data.get("title"), data.get("item_type"))
         os.makedirs(folder, exist_ok=True)
-        for key in ("file_link", "bibtex_path", "supplementary_paths", "image_paths"):
+        for key in ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "equation_pdf_path"):
             multiple = key in ("supplementary_paths", "image_paths")
             paths = (data.get(key) or "").split("; ") if multiple else [data.get(key) or ""]
             stored = []
@@ -1081,7 +1154,7 @@ class NMRCatalog(CatalogWindow):
             rows = self.conn.execute("SELECT * FROM literature").fetchall()
             changed = 0
             missing = 0
-            columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path")
+            columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
             with self.conn:
                 for row in rows:
                     for key in columns:
@@ -1301,7 +1374,7 @@ class NMRCatalog(CatalogWindow):
             except Exception as error:
                 messagebox.showerror(APP_TITLE, f"Could not open the entry folder:\n{error}")
             return
-        candidates = [row["file_link"], row["bibtex_path"], row["notes_path"]]
+        candidates = [row["file_link"], row["bibtex_path"], row["notes_path"], row["equation_pdf_path"]]
         candidates.extend((row["supplementary_paths"] or "").split("; "))
         candidates.extend((row["image_paths"] or "").split("; "))
         existing = next((self.resolve_stored_path(path) for path in candidates
@@ -1379,7 +1452,7 @@ class NMRCatalog(CatalogWindow):
 
     def sync_csv(self):
         """Keep a spreadsheet-readable catalog synchronized automatically."""
-        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer")
+        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer", "equation_pdf_path")
         rows = self.conn.execute(f"SELECT {', '.join(columns)} FROM literature ORDER BY title").fetchall()
         try:
             temporary = AUTO_CSV_PATH + ".tmp"
