@@ -34,7 +34,6 @@ PyCat/
 ├── PyCat_NMR_README.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
-├── .venv/                     # local only; do not move between operating systems
 └── NMR_Library/
     ├── Papers/
     ├── Books/
@@ -99,16 +98,17 @@ The following commands are suitable for Ubuntu and Debian-based systems.
    cd ~/Documents/LSDRM/Bibliography/PyCat
    ```
 
-3. Create the virtual environment:
+3. Create a local virtual-environment folder and an environment named `pycat`:
 
    ```bash
-   python3 -m venv .venv
+   mkdir -p ~/venv
+   python3 -m venv ~/venv/pycat
    ```
 
 4. Activate it:
 
    ```bash
-   source .venv/bin/activate
+   source ~/venv/pycat/bin/activate
    ```
 
 5. Install the Python dependencies:
@@ -134,7 +134,7 @@ For later sessions:
 
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
-source .venv/bin/activate
+source ~/venv/pycat/bin/activate
 python PyCat_NMR.py
 ```
 
@@ -155,22 +155,23 @@ deactivate
    cd "C:\Users\Vineeth\Documents\PyCat"
    ```
 
-3. Create a Windows virtual environment:
+3. Create a local virtual-environment folder and an environment named `pycat`:
 
    ```powershell
-   py -m venv .venv
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\venv"
+   py -m venv "$env:USERPROFILE\venv\pycat"
    ```
 
 4. Activate it in PowerShell:
 
    ```powershell
-   .\.venv\Scripts\Activate.ps1
+   & "$env:USERPROFILE\venv\pycat\Scripts\Activate.ps1"
    ```
 
    In Command Prompt instead, use:
 
    ```bat
-   .venv\Scripts\activate.bat
+   %USERPROFILE%\venv\pycat\Scripts\activate.bat
    ```
 
 5. Install the Python dependencies:
@@ -194,7 +195,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-.\.venv\Scripts\python.exe PyCat_NMR.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR.py
 ```
 
 ## macOS installation
@@ -209,11 +210,13 @@ interpreter directly:
    cd ~/Documents/PyCat
    ```
 
-3. Create and activate the virtual environment:
+3. Create a local virtual-environment folder, create an environment named
+   `pycat`, and activate it:
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
+   mkdir -p ~/venv
+   python3 -m venv ~/venv/pycat
+   source ~/venv/pycat/bin/activate
    ```
 
 4. Install the Python dependencies:
@@ -239,14 +242,16 @@ interpreter directly:
 ## Important virtual-environment rule
 
 A virtual environment contains operating-system-specific executables and
-absolute interpreter paths. **Do not copy `.venv` between Linux, Windows, and
-macOS.** Create a new `.venv` on each computer or keep separate environments
-outside the portable PyCat folder.
+absolute interpreter paths. **Do not copy a virtual environment between Linux,
+Windows, and macOS.** Create a separate local environment named `pycat` on each
+computer. Keeping it in the computer's local `venv` folder means it does not
+travel with or clutter the portable PyCat folder.
 
 If PyCat is on a USB drive, a convenient approach is:
 
 ```text
-Computer's internal drive: local .venv and installed dependencies
+Linux/macOS internal drive: ~/venv/pycat
+Windows internal drive:     %USERPROFILE%\venv\pycat
 USB drive: PyCat_NMR.py, database, CSV, and NMR_Library
 ```
 
@@ -413,18 +418,23 @@ than deletes originals, but a separate backup is still recommended.
 
 ### `externally-managed-environment`
 
-Your operating system protects its system Python. Create and activate `.venv`
-and install packages there; do not use `--break-system-packages` for PyCat.
+Your operating system protects its system Python. Create and activate the local
+`pycat` environment and install packages there; do not use
+`--break-system-packages` for PyCat.
 
-### `.venv` is not visible on Linux or macOS
+### Find the local environment
 
-Names beginning with a dot are hidden. In a terminal use:
+On Linux or macOS:
 
 ```bash
-ls -la
+ls -la ~/venv/pycat
 ```
 
-In many graphical file managers, press `Ctrl+H` to show hidden files.
+On Windows PowerShell:
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\venv\pycat"
+```
 
 ### Confirm which environment is active
 
@@ -481,4 +491,3 @@ sudo apt install file-roller
 - [Python virtual environments](https://docs.python.org/3/library/venv.html)
 - [Python Packaging User Guide: venv and pip](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)
 - [Matplotlib: text rendering with LaTeX](https://matplotlib.org/stable/users/explain/text/usetex.html)
-
