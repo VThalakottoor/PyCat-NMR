@@ -12,8 +12,8 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 - Five entry types: **Paper**, **Book**, **Thesis**, **Image**, and **Equation**.
 - Search by title, author, keyword, section, subsection, or all fields.
 - Filters for entry type, section, and subsection.
-- Attach a document or web link, multiple supplementary files, BibTeX, and
-  multiple images.
+- Attach a local PDF by file selection or drag-and-drop, plus multiple
+  supplementary files, BibTeX, and images.
 - Attach BibTeX from an existing `.bib` file or paste BibTeX directly into
   PyCat.
 - Editable notes for every entry type, also saved as `Notes.txt`.
@@ -68,6 +68,7 @@ uses the first author in **Authors**. If both fields are empty, it uses
 - Tkinter for the desktop interface.
 - Matplotlib for quick equation preview.
 - Pillow for full LaTeX preview image processing.
+- Optional: tkinterdnd2 for dragging PDF files from the desktop into PyCat.
 - Optional: a LaTeX distribution and Poppler for Full LaTeX preview and PDF
   export in `Text + equations` or `Full LaTeX` mode.
 
@@ -76,6 +77,7 @@ The Python packages installed with `pip` are:
 ```text
 matplotlib
 pillow
+tkinterdnd2
 ```
 
 SQLite, CSV, and Tkinter interfaces are used from Python's standard library,
@@ -115,7 +117,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 
    ```bash
    python -m pip install --upgrade pip
-   python -m pip install matplotlib pillow
+   python -m pip install matplotlib pillow tkinterdnd2
    ```
 
 6. Optional: install Full LaTeX support:
@@ -178,7 +180,7 @@ deactivate
 
    ```powershell
    python -m pip install --upgrade pip
-   python -m pip install matplotlib pillow
+   python -m pip install matplotlib pillow tkinterdnd2
    ```
 
 6. Optional: install MiKTeX or TeX Live for Full LaTeX and install Poppler so
@@ -223,7 +225,7 @@ interpreter directly:
 
    ```bash
    python -m pip install --upgrade pip
-   python -m pip install matplotlib pillow
+   python -m pip install matplotlib pillow tkinterdnd2
    ```
 
 5. Optional: install MacTeX for Full LaTeX. If Homebrew is installed, install
@@ -289,7 +291,8 @@ at that moment.
 3. Enter the title, section, and subsection.
 4. For literature, complete the authors, corresponding author, year, source,
    DOI/ISBN, and keywords as available.
-5. Attach the relevant files.
+5. Enter the title, then select the PDF with **Select PDF...**, or drag one PDF
+   from the operating system's file manager onto **Drop PDF here**.
 6. Enter notes or equation content if required.
 7. Click **Add**.
 
@@ -307,17 +310,21 @@ the entry folder separately if you also want to remove stored attachments.
 
 ## Adding multiple supplementary files
 
-1. Select or create an entry.
-2. Click **Supplement...**.
-3. Hold `Ctrl` on Linux/Windows or `Command` on macOS to select multiple files.
-   Use `Shift` to select a range.
-4. Click **Open**.
-5. Click **Add** for a new entry or **Update** for an existing entry.
+There are two ways to add supplementary material:
 
-Clicking **Supplement...** again adds more files without discarding existing
-ones. **Open Supplementary** opens every available supplementary attachment in
-its default application. A ZIP file opens in the operating system's default
-archive manager; PyCat does not extract it automatically.
+- Drag one or several files from the operating system's file manager onto
+  **Drop supplementary files here**.
+- Click **Supplement...**, hold `Ctrl` on Linux/Windows or `Command` on macOS,
+  select multiple files, and click **Open**. Use `Shift` to select a range.
+
+Then click **Add** for a new entry or **Update** for an existing entry.
+
+Dropping more files or clicking **Supplement...** again adds them without
+discarding existing ones. Duplicate stored locations are not added twice.
+Folders in a drop are skipped. **Open Supplementary** opens every available
+supplementary attachment in its default application. A ZIP file opens in the
+operating system's default archive manager; PyCat does not extract it
+automatically.
 
 ## BibTeX
 
@@ -371,9 +378,28 @@ Click **Preview** to render the content. Click **Save PDF...** to export
 `Title-Equations.pdf`; the save dialog starts in the entry's own folder. Click
 **Add** or **Update** to retain the editable source in the catalog.
 
+## PDF attachment and drag-and-drop
+
+The **PDF attachment** field stores only the location of a local PDF copied
+into the entry folder. It does not accept typed paths or web links. For a Paper,
+Book, or Thesis:
+
+1. Enter the title first so PyCat can create the correct Author-Title folder.
+2. Click **Select PDF...** and choose one PDF, or drag one PDF onto
+   **Drop PDF here**.
+3. Click **Add** or **Update** to save the catalog entry.
+
+Drag-and-drop requires `tkinterdnd2`. Without it, PyCat still works and shows
+the normal **Select PDF...** button. Install it in the active `pycat`
+environment with:
+
+```bash
+python -m pip install tkinterdnd2
+```
+
 ## Images
 
-Use **File...** for a primary image or **Images...** to attach several images.
+Use **Images...** to attach one or several images.
 **Open Images** launches saved images in the operating system's default image
 viewer.
 
@@ -452,12 +478,12 @@ $env:VIRTUAL_ENV
 Get-Command python
 ```
 
-### `No module named matplotlib` or `No module named PIL`
+### `No module named matplotlib`, `PIL`, or `tkinterdnd2`
 
 Activate the correct environment, then run:
 
 ```bash
-python -m pip install matplotlib pillow
+python -m pip install matplotlib pillow tkinterdnd2
 ```
 
 ### Full LaTeX preview fails
