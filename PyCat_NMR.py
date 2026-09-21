@@ -27,7 +27,6 @@ import tkinter as tk
 import tempfile
 import threading
 import unicodedata
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -52,7 +51,7 @@ CATEGORY_FOLDERS = {
 ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Note", "Image", "Equation")
 
 
-APP_VERSION = "18"
+APP_VERSION = "19"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -236,14 +235,14 @@ class NMRCatalog(CatalogWindow):
         definitions = (
             ("item_type", "Type", ITEM_TYPES),
             ("title", "Title *", None),
-            ("authors", "Authors (separate with ;)", None),
+            ("authors", "Authors * (literature)", None),
             ("year", "Year", None),
             ("source", "Journal / Publisher / University", None),
             ("volume_issue_pages", "Volume, issue, pages", None),
             ("doi_isbn", "DOI / ISBN", None),
             ("keywords", "NMR keywords", None),
-            ("section", "Section / Field", None),
-            ("subsection", "Subsection", None),
+            ("section", "Section / Field *", None),
+            ("subsection", "Subsection *", None),
             ("corresponding_author", "Corresponding author", None),
             ("author_email", "Author email", None),
             ("file_link", "PDF attachment", None),
@@ -563,10 +562,7 @@ class NMRCatalog(CatalogWindow):
         self.open_latex_pdf_button.configure(state="normal" if equation_enabled else "disabled")
 
     def ensure_compact_title(self, image_path=None):
-        kind = self.fields["item_type"].get()
-        if kind in ("Equation", "Image") and not self.fields["title"].get().strip():
-            label = os.path.splitext(os.path.basename(image_path))[0] if image_path else kind
-            self.fields["title"].set(f"{label} {uuid.uuid4().hex[:8]}")
+        # v19 requires a user-supplied title for every entry type.
         return self.fields["title"].get().strip()
 
     def _renderer_changed(self, _event=None):
@@ -801,24 +797,37 @@ class NMRCatalog(CatalogWindow):
         values = {name: variable.get().strip() for name, variable in self.fields.items()}
         values["equation_latex"] = self.equation_text.get("1.0", "end-1c").strip()
         values["equation_renderer"] = self.renderer_var.get()
-        if values["item_type"] in ("Equation", "Image") and not values["title"]:
-            values["title"] = self.ensure_compact_title()
         values["notes"] = self.notes.get("1.0", "end").strip()
         return values
 
-    def add_item(self):
-        data = self.values_from_form()
-        if not data["title"]:
-            messagebox.showwarning(APP_TITLE, "Please enter a title.")
-            return
+    def validate_entry_data(self, data):
+        """Enforce the metadata needed for consistent search and folder organization."""
+        required = (
+            ("title", "Please enter a title."),
+            ("section", "Please enter a section / field."),
+            ("subsection", "Please enter a subsection."),
+        )
+        for key, message in required:
+            if not data.get(key):
+                messagebox.showwarning(APP_TITLE, message)
+                return False
+        if data["item_type"] in ("Paper", "Book", "Manual", "Thesis") and not data.get("authors"):
+            messagebox.showwarning(APP_TITLE, "Please enter at least one author.")
+            return False
         if data["item_type"] == "Equation" and not data["equation_latex"]:
             messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
-            return
+            return False
         if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"]):
             messagebox.showwarning(APP_TITLE, "Please enter a note or an equation.")
-            return
+            return False
         if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
             messagebox.showwarning(APP_TITLE, "Please select an image using Images…")
+            return False
+        return True
+
+    def add_item(self):
+        data = self.values_from_form()
+        if not self.validate_entry_data(data):
             return
         try:
             data = self.organize_entry_data(data)
@@ -841,17 +850,7 @@ class NMRCatalog(CatalogWindow):
             messagebox.showinfo(APP_TITLE, "Select an item to update.")
             return
         data = self.values_from_form()
-        if not data["title"]:
-            messagebox.showwarning(APP_TITLE, "Please enter a title.")
-            return
-        if data["item_type"] == "Equation" and not data["equation_latex"]:
-            messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
-            return
-        if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"]):
-            messagebox.showwarning(APP_TITLE, "Please enter a note or an equation.")
-            return
-        if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
-            messagebox.showwarning(APP_TITLE, "Please select an image using Images…")
+        if not self.validate_entry_data(data):
             return
         try:
             data = self.organize_entry_data(data)
@@ -1392,6 +1391,9 @@ class NMRCatalog(CatalogWindow):
 
     def attach_image_files(self, paths):
         """Validate and attach one or more images without discarding existing ones."""
+        if not self.fields["title"].get().strip():
+            messagebox.showinfo(APP_TITLE, "Enter the title before attaching images.")
+            return 0
         extensions = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
         valid = []
         skipped = []
@@ -1761,7 +1763,20 @@ class NMRCatalog(CatalogWindow):
         path = filedialog.askopenfilename(title="Import BibTeX", filetypes=(("BibTeX files", "*.bib"), ("Text files", "*.txt"), ("All files", "*.*")))
         if not path:
             return
-        section = simpledialog.askstring(APP_TITLE, "Section / field for these entries (optional):", parent=self) or ""
+        section = simpledialog.askstring(APP_TITLE, "Section / field for these entries (required):", parent=self)
+        if section is None:
+            return
+        section = section.strip()
+        if not section:
+            messagebox.showwarning(APP_TITLE, "Section / field is required for BibTeX import.")
+            return
+        subsection = simpledialog.askstring(APP_TITLE, "Subsection for these entries (required):", parent=self)
+        if subsection is None:
+            return
+        subsection = subsection.strip()
+        if not subsection:
+            messagebox.showwarning(APP_TITLE, "Subsection is required for BibTeX import.")
+            return
         try:
             with open(path, encoding="utf-8-sig") as file:
                 entries = self.parse_bibtex(file.read())
@@ -1786,7 +1801,10 @@ class NMRCatalog(CatalogWindow):
                 if file_link and ":" in file_link:
                     candidates = [part for part in file_link.split(":") if part.lower().endswith(".pdf")]
                     file_link = candidates[0] if candidates else file_link
-                author_text = bib.get("author", "")
+                author_text = bib.get("author", "").strip()
+                if not author_text:
+                    skipped += 1
+                    continue
                 corresponding = (
                     bib.get("correspondingauthor") or bib.get("corresponding_author")
                     or bib.get("corresponding-author") or ""
@@ -1795,7 +1813,7 @@ class NMRCatalog(CatalogWindow):
                 self.fields["item_type"].set(item_type)
                 self.fields["authors"].set(author_text.replace(" and ", "; "))
                 self.fields["section"].set(section)
-                self.fields["subsection"].set("")
+                self.fields["subsection"].set(subsection)
                 self.fields["corresponding_author"].set(corresponding)
                 self.fields["title"].set(title)
                 if file_link and os.path.isfile(os.path.expanduser(file_link)) and file_link.lower().endswith(".pdf"):
@@ -1806,13 +1824,13 @@ class NMRCatalog(CatalogWindow):
                 notes = bib.get("note") or bib.get("abstract", "")
                 if bib.get("url"):
                     notes = (notes + "\n\n" if notes else "") + "Source URL: " + bib["url"]
-                notes_path = self.write_notes_file(notes, section, "", self.folder_author(corresponding, author_text), title, item_type)
+                notes_path = self.write_notes_file(notes, section, subsection, self.folder_author(corresponding, author_text), title, item_type)
                 values = (
                     item_type,
                     title,
                     author_text.replace(" and ", "; "),
                     bib.get("year", ""), source, volume_data, doi_isbn,
-                    bib.get("keywords", ""), section, "", corresponding, bib.get("email", ""),
+                    bib.get("keywords", ""), section, subsection, corresponding, bib.get("email", ""),
                     file_link, "", stored_bib, "", notes_path, notes,
                 )
                 self.conn.execute(f"INSERT INTO literature ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})", values)

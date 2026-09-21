@@ -1,4 +1,4 @@
-# PyCat NMR v18
+# PyCat NMR v19
 
 PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
 theses, notes, images, equations, BibTeX records, and supplementary material. It uses
@@ -33,8 +33,8 @@ Keep the complete PyCat directory together:
 
 ```text
 PyCat/
-├── PyCat_NMR_v18.py
-├── README_v18.md
+├── PyCat_NMR_v19.py
+├── README_v19.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
 └── NMR_Library/
@@ -135,7 +135,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 7. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v18.py
+   python PyCat_NMR_v19.py
    ```
 
 For later sessions:
@@ -143,7 +143,7 @@ For later sessions:
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
 source ~/venv/pycat/bin/activate
-python PyCat_NMR_v18.py
+python PyCat_NMR_v19.py
 ```
 
 Leave the virtual environment with:
@@ -195,7 +195,7 @@ deactivate
 7. Run PyCat:
 
    ```powershell
-   python PyCat_NMR_v18.py
+   python PyCat_NMR_v19.py
    ```
 
 If PowerShell blocks activation, either use Command Prompt with
@@ -203,7 +203,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v18.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v19.py
 ```
 
 ## macOS installation
@@ -244,7 +244,7 @@ interpreter directly:
 6. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v18.py
+   python PyCat_NMR_v19.py
    ```
 
 ## Important virtual-environment rule
@@ -260,7 +260,7 @@ If PyCat is on a USB drive, a convenient approach is:
 ```text
 Linux/macOS internal drive: ~/venv/pycat
 Windows internal drive:     %USERPROFILE%\venv\pycat
-USB drive: PyCat_NMR_v18.py, database, CSV, and NMR_Library
+USB drive: PyCat_NMR_v19.py, database, CSV, and NMR_Library
 ```
 
 You do not have to activate a virtual environment if you call its Python
@@ -294,19 +294,21 @@ at that moment.
 
 1. Open **Upload / Edit**.
 2. Select Paper, Book, Manual, Thesis, Note, Image, or Equation.
-3. Enter the title, section, and subsection.
-4. For literature, complete the authors, corresponding author, year, source,
-   DOI/ISBN, and keywords as available.
+3. Enter the required **Title**, **Section**, and **Subsection**. These three
+   fields are compulsory for every entry type.
+4. For Paper, Book, Manual, and Thesis, enter at least one name in **Authors**.
+   Authors are not required for Note, Image, or Equation. Corresponding author,
+   year, source, DOI/ISBN, and keywords remain optional.
 5. Enter the title, then select the PDF with **Select PDF...**, or drag one PDF
    from the operating system's file manager onto **Drop PDF here**.
 6. Enter notes or equation content if required.
 7. Click **Add**.
 
-Manual uses the same full metadata and attachment controls as Paper. For Note,
+PyCat will not add or update an entry while a compulsory field is empty. Manual
+uses the same full metadata and attachment controls as Paper. For Note,
 only Title, Section, Subsection, Notes, and the equation editor remain active;
 enter at least a note or an equation. Image and Equation also disable fields
-that are not relevant. If an Image or Equation title is left empty, PyCat
-generates one automatically.
+that are not relevant. Titles are never generated automatically.
 
 ## Editing or deleting an entry
 
@@ -349,7 +351,8 @@ After selecting or dropping a `.bib` file, PyCat asks whether its metadata
 should fill the form. After any attachment method, click **Add** or **Update**
 to save the catalog entry.
 **Import BibTeX** can create multiple catalog entries from a BibTeX database;
-incomplete or duplicate entries are skipped.
+it asks for one compulsory Section and Subsection for the imported group.
+Entries without a title or author, and duplicate entries, are skipped.
 
 ## Notes
 
@@ -396,7 +399,7 @@ current form's exported PDF. Under **Search Library**, select an entry and click
 main literature PDF. Click **Add** or **Update** after exporting to retain the
 editable source and the LaTeX PDF location in the catalog.
 
-For files exported by an older PyCat version, v18 also checks the entry folder
+For files exported by an older PyCat version, v19 also checks the entry folder
 for the standard `Title-Equations.pdf` filename and records it automatically
 when opened.
 
