@@ -1051,7 +1051,7 @@ class NMRCatalog(tk.Tk):
         dialog.transient(self)
         panel = ttk.Frame(dialog, padding=12)
         panel.pack(fill="both", expand=True)
-        ttk.Label(panel, text="Paste your BibTeX below. Save attaches it as a .bib file to this entry.",
+        ttk.Label(panel, text="Paste BibTeX below. Fill Form extracts its metadata; Save attaches a .bib file.",
                   wraplength=650).pack(anchor="w", pady=(0, 8))
         body = ttk.Frame(panel)
         body.pack(fill="both", expand=True)
@@ -1091,6 +1091,9 @@ class NMRCatalog(tk.Tk):
         buttons = ttk.Frame(panel)
         buttons.pack(fill="x", pady=(10, 0))
         ttk.Button(buttons, text="Paste from clipboard", command=paste).pack(side="left")
+        ttk.Button(buttons, text="Fill Form", command=lambda: self.fill_form_from_bibtex_text(
+            editor.get("1.0", "end-1c"), parent=dialog
+        )).pack(side="left", padx=5)
         ttk.Button(buttons, text="Save .bib", command=save).pack(side="right")
         ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=5)
         dialog.grab_set()
@@ -1109,6 +1112,13 @@ class NMRCatalog(tk.Tk):
         if path:
             try:
                 self.fields["bibtex_path"].set(self.store_document(path, "BibTeX"))
+                with open(path, encoding="utf-8-sig", errors="replace") as file:
+                    bibtex_text = file.read()
+                if messagebox.askyesno(
+                    APP_TITLE, "BibTeX file attached. Fill the form from its metadata now?",
+                    default=messagebox.YES,
+                ):
+                    self.fill_form_from_bibtex_text(bibtex_text)
             except OSError as error:
                 messagebox.showerror(APP_TITLE, f"Could not store the BibTeX file:\n{error}")
 
@@ -1344,6 +1354,124 @@ class NMRCatalog(tk.Tk):
             position = end
         return entries
 
+    @staticmethod
+    def bibtex_form_values(entry_type, bib):
+        """Map one parsed BibTeX entry to PyCat form fields."""
+        entry_type = (entry_type or "").lower()
+        if entry_type in ("book", "inbook", "booklet", "proceedings", "manual"):
+            item_type = "Book"
+        elif entry_type in ("phdthesis", "mastersthesis", "thesis"):
+            item_type = "Thesis"
+        else:
+            item_type = "Paper"
+
+        author_text = (bib.get("author") or "").strip()
+        authors = re.sub(r"\s+and\s+", "; ", author_text, flags=re.IGNORECASE)
+        corresponding = (
+            bib.get("correspondingauthor")
+            or bib.get("corresponding_author")
+            or bib.get("corresponding-author")
+            or ""
+        )
+        source = (
+            bib.get("journal") or bib.get("booktitle") or bib.get("publisher")
+            or bib.get("school") or bib.get("institution") or ""
+        )
+        volume_data = ", ".join(filter(None, (
+            bib.get("volume"), bib.get("number") or bib.get("issue"), bib.get("pages")
+        )))
+        values = {
+            "item_type": item_type,
+            "title": bib.get("title", ""),
+            "authors": authors,
+            "year": bib.get("year", ""),
+            "source": source,
+            "volume_issue_pages": volume_data,
+            "doi_isbn": bib.get("doi") or bib.get("isbn", ""),
+            "keywords": bib.get("keywords") or bib.get("keyword", ""),
+            "corresponding_author": corresponding,
+            "author_email": bib.get("email", ""),
+        }
+        notes = bib.get("abstract") or bib.get("note", "")
+        url = bib.get("url", "")
+        return values, notes, url
+
+    def apply_bibtex_to_form(self, entry_type, bib):
+        values, notes, url = self.bibtex_form_values(entry_type, bib)
+        populated = []
+        for name, value in values.items():
+            if value:
+                self.fields[name].set(value)
+                populated.append(name)
+        if url and not self.fields["file_link"].get().strip():
+            self.fields["file_link"].set(url)
+            populated.append("file_link")
+        if notes:
+            self.notes.configure(state="normal")
+            self.notes.delete("1.0", "end")
+            self.notes.insert("1.0", notes)
+            populated.append("notes")
+        self.update_type_controls()
+        self.tabs.select(1)
+        return populated
+
+    def fill_form_from_bibtex_text(self, text, parent=None):
+        entries = self.parse_bibtex(text)
+        if not entries:
+            messagebox.showwarning(APP_TITLE, "No valid BibTeX entry was found.", parent=parent)
+            return False
+        if len(entries) == 1:
+            self.apply_bibtex_to_form(*entries[0])
+            messagebox.showinfo(
+                APP_TITLE,
+                "The form was filled from BibTeX. Review the fields, then click Add or Update.",
+                parent=parent,
+            )
+            return True
+
+        chooser = tk.Toplevel(parent or self)
+        chooser.title("Choose a BibTeX entry")
+        chooser.geometry("760x380")
+        chooser.minsize(480, 280)
+        chooser.transient(parent or self)
+        panel = ttk.Frame(chooser, padding=12)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text=f"This file contains {len(entries)} entries. Choose one to fill the form.").pack(anchor="w", pady=(0, 8))
+        list_frame = ttk.Frame(panel)
+        list_frame.pack(fill="both", expand=True)
+        choices = tk.Listbox(list_frame, exportselection=False)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=choices.yview)
+        choices.configure(yscrollcommand=scroll.set)
+        choices.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        for entry_type, bib in entries:
+            title = bib.get("title") or "Untitled"
+            author = bib.get("author") or "Unknown author"
+            choices.insert("end", f"{entry_type}: {title} — {author}")
+        choices.selection_set(0)
+
+        def apply_selected(_event=None):
+            selection = choices.curselection()
+            if not selection:
+                messagebox.showinfo(APP_TITLE, "Select a BibTeX entry first.", parent=chooser)
+                return
+            self.apply_bibtex_to_form(*entries[selection[0]])
+            chooser.destroy()
+            messagebox.showinfo(
+                APP_TITLE,
+                "The form was filled from the selected BibTeX entry. Review it, then click Add or Update.",
+                parent=parent,
+            )
+
+        actions = ttk.Frame(panel)
+        actions.pack(fill="x", pady=(10, 0))
+        ttk.Button(actions, text="Fill Form", command=apply_selected).pack(side="right")
+        ttk.Button(actions, text="Cancel", command=chooser.destroy).pack(side="right", padx=5)
+        choices.bind("<Double-1>", apply_selected)
+        chooser.grab_set()
+        choices.focus_set()
+        return True
+
     def import_bibtex(self):
         path = filedialog.askopenfilename(title="Import BibTeX", filetypes=(("BibTeX files", "*.bib"), ("Text files", "*.txt"), ("All files", "*.*")))
         if not path:
@@ -1374,7 +1502,10 @@ class NMRCatalog(tk.Tk):
                     candidates = [part for part in file_link.split(":") if part.lower().endswith(".pdf")]
                     file_link = candidates[0] if candidates else file_link
                 author_text = bib.get("author", "")
-                corresponding = author_text.split(" and ")[0] if author_text else ""
+                corresponding = (
+                    bib.get("correspondingauthor") or bib.get("corresponding_author")
+                    or bib.get("corresponding-author") or ""
+                )
                 item_type = "Book" if entry_type in ("book", "inbook") else "Thesis" if entry_type in ("phdthesis", "mastersthesis", "thesis") else "Paper"
                 self.fields["item_type"].set(item_type)
                 self.fields["authors"].set(author_text.replace(" and ", "; "))
