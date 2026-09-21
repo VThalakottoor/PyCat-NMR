@@ -1,11 +1,21 @@
-"""PyCat NMR — Python Catalog for NMR books and research papers.
+r"""PyCat NMR — Python Catalog for NMR papers, books, theses, images, and equations.
 
 Author: Vineeth Francis Thalakottoor (vineeth.thalakottoor@cea.fr)
 
-Run with: python NMR_Catalog.py
-The SQLite database is created beside this script as nmr_catalog.db.
+Run with: python PyCat_NMR.py
+Equation previews require: python -m pip install matplotlib
+Quick preview uses Matplotlib MathText. Full LaTeX uses pdflatex + pdftoppm.
+Ubuntu/Debian: sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
+Full LaTeX image conversion requires Pillow: python -m pip install pillow
+Enter one equation per line, optionally wrapped in $...$, $$...$$, \[...\], or \(...\).
+The SQLite database and NMR_Library are created beside this script.
+Catalog attachment paths are stored relative to this folder so the complete
+PyCat directory can move between Linux, Windows, and macOS on a USB drive.
 """
 
+import base64
+import io
+import filecmp
 import csv
 import os
 import re
@@ -14,8 +24,20 @@ import sqlite3
 import subprocess
 import sys
 import tkinter as tk
+import tempfile
+import threading
+import unicodedata
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
+
+
+_MATH_RENDER_LOCK = threading.RLock()
+
+CATEGORY_FOLDERS = {"Paper": "Papers", "Book": "Books", "Equation": "Equations", "Image": "Images", "Thesis": "Thesis"}
+
+ITEM_TYPES = ("Paper", "Book", "Thesis", "Image", "Equation")
 
 
 APP_TITLE = "PyCat NMR"
@@ -48,9 +70,17 @@ class NMRCatalog(tk.Tk):
         self.geometry("1180x720")
         self.minsize(900, 600)
         self.selected_id = None
+        self._latex_executor = ThreadPoolExecutor(max_workers=1)
+        self._latex_future = None
+        self._pdf_future = None
+        self._pdf_poll_job = None
+        self._latex_poll_job = None
+        self._preview_generation = 0
         self.conn = sqlite3.connect(DB_PATH)
         self.conn.row_factory = sqlite3.Row
         self._create_database()
+        self.make_existing_paths_portable()
+        self.ensure_category_folders()
         self._build_style()
         self._build_ui()
         self.update_filter_dropdowns()
@@ -90,7 +120,7 @@ class NMRCatalog(tk.Tk):
         migrations = {
             "section": "TEXT", "subsection": "TEXT", "corresponding_author": "TEXT",
             "author_email": "TEXT", "supplementary_paths": "TEXT", "bibtex_path": "TEXT",
-            "image_paths": "TEXT", "notes_path": "TEXT",
+            "image_paths": "TEXT", "notes_path": "TEXT", "equation_latex": "TEXT", "equation_renderer": "TEXT",
         }
         for column, data_type in migrations.items():
             if column not in existing:
@@ -116,8 +146,8 @@ class NMRCatalog(tk.Tk):
         ttk.Label(heading, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
         ttk.Label(heading, text=APP_SUBTITLE, style="Subtitle.TLabel").pack(anchor="w")
 
-        search_frame = ttk.Frame(header)
-        search_frame.pack(side="right")
+        search_frame = ttk.Frame(self, padding=(14, 0, 14, 10))
+        search_frame.pack(fill="x")
         ttk.Label(search_frame, text="Search:").pack(side="left", padx=(0, 5))
         self.search_var = tk.StringVar()
         search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=32)
@@ -134,7 +164,7 @@ class NMRCatalog(tk.Tk):
         ttk.Combobox(
             search_frame,
             textvariable=self.filter_var,
-            values=("All", "Paper", "Book"),
+            values=("All", *ITEM_TYPES),
             state="readonly",
             width=8,
         ).pack(side="left", padx=(8, 0))
@@ -164,18 +194,34 @@ class NMRCatalog(tk.Tk):
         body.add(upload_tab, text="Upload / Edit")
         self.tabs = body
 
-        form = ttk.LabelFrame(upload_tab, text="Paper or book information", padding=12)
-        table_frame = ttk.LabelFrame(search_tab, text="Books and papers", padding=8)
-        form.pack(fill="both", expand=True)
+        # Scroll metadata independently so Add/Update remain accessible on small screens.
+        editor = ttk.Panedwindow(upload_tab, orient="horizontal")
+        editor.pack(fill="both", expand=True)
+        metadata = ttk.Frame(editor)
+        editor.add(metadata, weight=3)
+        form_canvas = tk.Canvas(metadata, highlightthickness=0, width=520)
+        form_scroll = ttk.Scrollbar(metadata, orient="vertical", command=form_canvas.yview)
+        form_canvas.configure(yscrollcommand=form_scroll.set)
+        form_scroll.pack(side="right", fill="y")
+        form_canvas.pack(side="left", fill="both", expand=True)
+        form = ttk.LabelFrame(form_canvas, text="Entry information", padding=12)
+        form_window = form_canvas.create_window((0, 0), window=form, anchor="nw")
+        form.bind("<Configure>", lambda _e: form_canvas.configure(scrollregion=form_canvas.bbox("all")))
+        form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfigure(form_window, width=e.width))
+        self.equation_panel = ttk.LabelFrame(editor, text="Equation editor", padding=12)
+        editor.add(self.equation_panel, weight=2)
+        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, theses, images, and equations", padding=8)
         table_frame.pack(fill="both", expand=True)
 
         self.fields = {}
+        self.field_widgets = {}
+        self.attachment_buttons = {}
         definitions = (
-            ("item_type", "Type", ("Paper", "Book")),
+            ("item_type", "Type", ITEM_TYPES),
             ("title", "Title *", None),
-            ("authors", "Authors", None),
+            ("authors", "Authors (separate with ;)", None),
             ("year", "Year", None),
-            ("source", "Journal / Publisher", None),
+            ("source", "Journal / Publisher / University", None),
             ("volume_issue_pages", "Volume, issue, pages", None),
             ("doi_isbn", "DOI / ISBN", None),
             ("keywords", "NMR keywords", None),
@@ -183,7 +229,7 @@ class NMRCatalog(tk.Tk):
             ("subsection", "Subsection", None),
             ("corresponding_author", "Corresponding author", None),
             ("author_email", "Author email", None),
-            ("file_link", "PDF path / web link", None),
+            ("file_link", "File path / web link", None),
             ("supplementary_paths", "Supplementary files", None),
             ("bibtex_path", "BibTeX attachment", None),
             ("image_paths", "Images", None),
@@ -196,28 +242,44 @@ class NMRCatalog(tk.Tk):
                 widget = ttk.Combobox(form, textvariable=var, values=choices, state="readonly")
             else:
                 widget = ttk.Entry(form, textvariable=var)
+            self.field_widgets[key] = widget
             widget.grid(row=row, column=1, sticky="ew", pady=(0, 8))
 
-        ttk.Button(form, text="PDF…", command=self.browse_file).grid(row=12, column=2, padx=(6, 0), pady=(0, 8))
-        ttk.Button(form, text="Supplement…", command=self.browse_supplementary).grid(row=13, column=2, padx=(6, 0), pady=(0, 8))
-        ttk.Button(form, text="BibTeX…", command=self.browse_bibtex_attachment).grid(row=14, column=2, padx=(6, 0), pady=(0, 8))
-        ttk.Button(form, text="Images…", command=self.browse_images).grid(row=15, column=2, padx=(6, 0), pady=(0, 8))
+        for row, key, label, command in (
+            (12, "file_link", "File…", self.browse_file),
+            (13, "supplementary_paths", "Supplement…", self.browse_supplementary),
+            (14, "bibtex_path", "BibTeX…", self.browse_bibtex_attachment),
+            (15, "image_paths", "Images…", self.browse_images),
+        ):
+            actions = ttk.Frame(form)
+            actions.grid(row=row, column=2, padx=(6, 0), pady=(0, 8), sticky="w")
+            button = ttk.Button(actions, text=label, command=command)
+            button.pack(side="left")
+            self.attachment_buttons[key] = button
+            if key == "bibtex_path":
+                paste_button = ttk.Button(actions, text="Paste…", command=self.paste_bibtex_attachment)
+                paste_button.pack(side="left", padx=(4, 0))
+                self.attachment_buttons["bibtex_paste"] = paste_button
         ttk.Label(form, text="Notes").grid(row=16, column=0, sticky="nw")
         self.notes = tk.Text(form, height=7, width=35, wrap="word")
         self.notes.grid(row=16, column=1, columnspan=2, sticky="nsew")
         form.columnconfigure(1, weight=1)
         form.rowconfigure(16, weight=1)
 
-        buttons = ttk.Frame(form)
-        buttons.grid(row=17, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        buttons = ttk.Frame(upload_tab)
+        buttons.pack(fill="x", pady=(12, 0))
         ttk.Button(buttons, text="Add", command=self.add_item).pack(side="left")
         ttk.Button(buttons, text="Update", command=self.update_item).pack(side="left", padx=5)
         ttk.Button(buttons, text="Clear", command=self.clear_form).pack(side="left")
         ttk.Button(buttons, text="Delete", command=self.delete_item).pack(side="right")
 
+        self._build_equation_editor()
+        self.fields["item_type"].trace_add("write", self.update_type_controls)
+        self.update_type_controls()
+
         columns = ("type", "title", "authors", "year", "section", "subsection", "source")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
-        headings = {"type": "Type", "title": "Title", "authors": "Authors", "year": "Year", "section": "Section", "subsection": "Subsection", "source": "Journal / Publisher"}
+        headings = {"type": "Type", "title": "Title", "authors": "Authors", "year": "Year", "section": "Section", "subsection": "Subsection", "source": "Journal / Publisher / University"}
         widths = {"type": 65, "title": 260, "authors": 190, "year": 60, "section": 130, "subsection": 130, "source": 170}
         for column in columns:
             self.tree.heading(column, text=headings[column], command=lambda c=column: self.sort_table(c, False))
@@ -236,18 +298,369 @@ class NMRCatalog(tk.Tk):
         footer = ttk.Frame(table_frame)
         footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.count_label = ttk.Label(footer, text="0 items")
-        self.count_label.pack(side="left")
-        ttk.Button(footer, text="Open PDF / Link", command=self.open_selected_file).pack(side="right")
+        self.count_label.pack(anchor="w")
+        ttk.Button(footer, text="Open / View", command=self.open_selected_file).pack(side="right")
         ttk.Button(footer, text="Open Supplementary", command=self.open_supplementary).pack(side="right", padx=5)
         ttk.Button(footer, text="View BibTeX", command=self.open_bibtex_file).pack(side="right", padx=5)
         ttk.Button(footer, text="Open Notes", command=self.open_notes_file).pack(side="right")
-        ttk.Button(footer, text="Open Entry Folder", command=self.open_entry_folder).pack(side="right", padx=5)
-        ttk.Button(footer, text="Edit Selected", command=lambda: self.tabs.select(1)).pack(side="right")
-        ttk.Button(footer, text="Import BibTeX", command=self.import_bibtex).pack(side="right", padx=5)
-        ttk.Button(footer, text="Library Folder", command=self.choose_library_folder).pack(side="right")
+        footer_more = ttk.Frame(table_frame)
+        footer_more.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        ttk.Button(footer_more, text="Open Images", command=self.open_images).pack(side="left")
+        ttk.Button(footer_more, text="Open Entry Folder", command=self.open_entry_folder).pack(side="right", padx=5)
+        ttk.Button(footer_more, text="Edit Selected", command=lambda: self.tabs.select(1)).pack(side="right")
+        ttk.Button(footer_more, text="Import BibTeX", command=self.import_bibtex).pack(side="right", padx=5)
+        ttk.Button(footer_more, text="Organize Files", command=self.organize_existing_files).pack(side="left", padx=5)
+
+
+    def _build_equation_editor(self):
+        panel = self.equation_panel
+        ttk.Label(panel, text="Text and LaTeX equations").pack(anchor="w")
+        self.renderer_var = tk.StringVar(value="Text + equations")
+        self.renderer_combo = ttk.Combobox(panel, textvariable=self.renderer_var,
+            values=("Text + equations", "Quick preview", "Full LaTeX"), state="readonly")
+        self.renderer_combo.pack(fill="x", pady=6)
+        self.renderer_combo.bind("<<ComboboxSelected>>", self._renderer_changed)
+        ttk.Label(panel, text="Text + equations: write paragraphs; use $...$ for inline\nmath and \\[...\\] for displayed equations.\nClick Preview to render, or Save PDF to export.",
+                  foreground="#555555").pack(anchor="w", pady=(4, 8))
+        self.equation_text = tk.Text(panel, height=9, width=32, wrap="word", undo=True)
+        self.equation_text.pack(fill="x")
+        self.equation_text.bind("<<Modified>>", self._equation_modified)
+        self._preview_job = None
+        self._equation_photo = None
+        actions = ttk.Frame(panel)
+        actions.pack(fill="x", pady=8)
+        self.preview_button = ttk.Button(actions, text="Preview", command=lambda: self.preview_equation(compile_full=True))
+        self.preview_button.pack(side="left")
+        self.example_button = ttk.Button(actions, text="Example", command=self.insert_equation_example)
+        self.example_button.pack(side="left", padx=4)
+        self.save_pdf_button = ttk.Button(actions, text="Save PDF…", command=self.save_equation_pdf)
+        self.save_pdf_button.pack(side="left", padx=4)
+        self.equation_status = ttk.Label(panel, text="", wraplength=330)
+        self.equation_status.pack(fill="x", pady=(0, 8))
+        preview = ttk.Frame(panel)
+        preview.pack(fill="both", expand=True)
+        self.equation_canvas = tk.Canvas(preview, background="white", highlightthickness=1,
+                                        highlightbackground="#cccccc", width=300, height=220)
+        yscroll = ttk.Scrollbar(preview, orient="vertical", command=self.equation_canvas.yview)
+        xscroll = ttk.Scrollbar(preview, orient="horizontal", command=self.equation_canvas.xview)
+        self.equation_canvas.configure(xscrollcommand=xscroll.set, yscrollcommand=yscroll.set)
+        self.equation_canvas.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+        preview.rowconfigure(0, weight=1)
+        preview.columnconfigure(0, weight=1)
+        self.preview_equation()
+
+    def _equation_modified(self, _event=None):
+        if not self.equation_text.edit_modified():
+            return
+        self.equation_text.edit_modified(False)
+        if self._preview_job is not None:
+            self.after_cancel(self._preview_job)
+        self._preview_job = self.after(500, self.preview_equation)
+
+    def insert_equation_example(self):
+        if self.equation_text.get("1.0", "end-1c").strip():
+            self.equation_text.insert("end", "\n")
+        if self.renderer_var.get() == "Text + equations":
+            example = ("Longitudinal relaxation\n\n"
+                       "The magnetization $M_z$ returns to its equilibrium value $M_0$.\n\n"
+                       r"\[ \frac{dM_z}{dt} = -\frac{M_z-M_0}{T_1} \]" + "\n\n"
+                       "Here, $T_1$ is the longitudinal relaxation time.")
+        else:
+            example = r"\frac{dM_z}{dt} = -\frac{M_z-M_0}{T_1}"
+        self.equation_text.insert("end", example)
+        self.preview_equation()
+
+    @staticmethod
+    def equation_png(latex, output_format="png"):
+        """Render common LaTeX math locally, without a TeX executable or shell."""
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib import rc_context
+
+        text = latex.strip()
+        if not text:
+            raise ValueError("Enter text or an equation first.")
+        for pattern in (r"\\\[([\s\S]*?)\\\]", r"\\\(([\s\S]*?)\\\)", r"\$\$([\s\S]*?)\$\$"):
+            text = re.sub(pattern, lambda match: "$" + match.group(1).strip().replace("\n", " ") + "$", text)
+        lines = text.splitlines()
+        with _MATH_RENDER_LOCK, rc_context({"text.usetex": False, "mathtext.fontset": "dejavusans"}):
+            fig = Figure(figsize=(6, max(1, len(lines) * 0.8)), dpi=130, facecolor="white")
+            canvas = FigureCanvasAgg(fig)
+            labels = []
+            for index, line in enumerate(lines):
+                # Unwrapped formula lines remain compatible with earlier catalog entries.
+                bare_math = "$" not in line and bool(re.search(r"[=^_]|\\[A-Za-z]+", line))
+                display = "$" + line + "$" if bare_math else line
+                labels.append(fig.text(0.02, 1 - (index + 0.5) / len(lines),
+                                       display, fontsize=20, va="center"))
+            canvas.draw()  # Validate before committing an image to the preview.
+            renderer = canvas.get_renderer()
+            for label in labels:
+                box = label.get_window_extent(renderer)
+                if box.width > 12000 or box.height > 12000:
+                    raise ValueError("Equation is too large to preview; split it into shorter lines.")
+            output = io.BytesIO()
+            fig.savefig(output, format=output_format, bbox_inches="tight", pad_inches=0.15, dpi=130)
+            return output.getvalue()
+
+    def preview_equation(self, compile_full=False):
+        if self._preview_job is not None:
+            self.after_cancel(self._preview_job)
+            self._preview_job = None
+        self._preview_generation += 1
+        latex = self.equation_text.get("1.0", "end-1c").strip()
+        self.equation_canvas.delete("all")
+        self._equation_photo = None
+        self.equation_canvas.configure(scrollregion=(0, 0, 1, 1))
+        if not latex:
+            self.equation_status.configure(text="Type an equation to see its preview.", foreground="#555555")
+            return
+        if self.renderer_var.get() in ("Full LaTeX", "Text + equations"):
+            if not compile_full:
+                self.equation_status.configure(text="Click Preview to compile with Full LaTeX.", foreground="#555555")
+                return
+            if self._latex_future is not None:
+                self.equation_status.configure(text="A compilation is finishing. Click Preview again shortly.", foreground="#555555")
+                return
+            self.equation_status.configure(text="Compiling LaTeX…", foreground="#555555")
+            self._latex_future = self._latex_executor.submit(self.full_latex_png, latex, "png", self.renderer_var.get() == "Text + equations")
+            generation = self._preview_generation
+            self._latex_poll_job = self.after(100, lambda: self._poll_latex(generation))
+            return
+        try:
+            png = self.equation_png(latex)
+            self._equation_photo = tk.PhotoImage(master=self, data=base64.b64encode(png).decode("ascii"))
+            self.equation_canvas.create_image(8, 8, anchor="nw", image=self._equation_photo)
+            self.equation_canvas.configure(scrollregion=self.equation_canvas.bbox("all"))
+            self.equation_status.configure(text="Preview updated. Use Add or Update to save the entry.", foreground="#27632a")
+        except ImportError:
+            self.equation_status.configure(text="Install equation preview support, then restart:\npython -m pip install matplotlib\nYour LaTeX text can still be saved.", foreground="#a04020")
+        except Exception as error:
+            self.equation_status.configure(text="Cannot preview this equation. Check the LaTeX syntax.\n" + str(error)[:240], foreground="#a04020")
+
+    def open_images(self):
+        paths = [p for p in self.fields["image_paths"].get().split("; ") if p]
+        primary = self.fields["file_link"].get().strip()
+        if (self.fields["item_type"].get() == "Image" and primary
+                and os.path.isfile(self.resolve_stored_path(primary))):
+            paths = list(dict.fromkeys([primary, *paths]))
+        if not paths:
+            messagebox.showinfo(APP_TITLE, "This entry has no attached images. Use File or Images to add one.")
+            return
+        try:
+            for path in paths:
+                resolved = self.resolve_stored_path(path)
+                if not os.path.isfile(resolved):
+                    raise FileNotFoundError(path)
+                open_with_system(resolved)
+        except Exception as error:
+            messagebox.showerror(APP_TITLE, f"Could not open the image:\n{error}")
+
+
+    def update_type_controls(self, *_args):
+        self._preview_generation += 1
+        kind = self.fields["item_type"].get()
+        compact = kind in ("Equation", "Image")
+        for key, widget in self.field_widgets.items():
+            if key == "item_type":
+                widget.configure(state="readonly")
+            elif compact:
+                widget.configure(state="normal" if key in ("title", "section", "subsection") else "disabled")
+            else:
+                widget.configure(state="normal")
+        for key, button in self.attachment_buttons.items():
+            enabled = not compact or (kind == "Image" and key in ("file_link", "image_paths"))
+            button.configure(state="normal" if enabled else "disabled")
+        self.notes.configure(state="normal")
+        equation_enabled = kind in ("Paper", "Book", "Thesis", "Equation")
+        self.equation_text.configure(state="normal" if equation_enabled else "disabled")
+        self.renderer_combo.configure(state="readonly" if equation_enabled else "disabled")
+        self.preview_button.configure(state="normal" if equation_enabled else "disabled")
+        self.example_button.configure(state="normal" if equation_enabled else "disabled")
+        self.save_pdf_button.configure(state="normal" if equation_enabled and self._pdf_future is None else "disabled")
+
+    def ensure_compact_title(self, image_path=None):
+        kind = self.fields["item_type"].get()
+        if kind in ("Equation", "Image") and not self.fields["title"].get().strip():
+            label = os.path.splitext(os.path.basename(image_path))[0] if image_path else kind
+            self.fields["title"].set(f"{label} {uuid.uuid4().hex[:8]}")
+        return self.fields["title"].get().strip()
+
+    def _renderer_changed(self, _event=None):
+        self.preview_equation()
+
+    @staticmethod
+    def full_latex_png(source, output_format="png", text_mode=False):
+        """Compile local LaTeX and return cropped PNG pages for the Tk preview."""
+        from PIL import Image, ImageChops, ImageOps
+        compiler = shutil.which("pdflatex")
+        converter = shutil.which("pdftoppm")
+        if not compiler or (output_format == "png" and not converter):
+            raise RuntimeError("Install Full LaTeX support:\nsudo apt install texlive-latex-base "
+                               "texlive-latex-recommended texlive-latex-extra poppler-utils")
+        source = source.strip()
+        if not source:
+            raise ValueError("Enter an equation first.")
+        if r"\documentclass" in source:
+            document = source
+        else:
+            # Display environments provide their own math mode; matrix/cases need a wrapper.
+            display = re.match(r"\\begin\{(?:align\*?|alignat\*?|gather\*?|multline\*?|equation\*?|flalign\*?|displaymath)\}", source)
+            wrapped = source.startswith(("$", r"\[", r"\("))
+            body = source if text_mode or display or wrapped else "\\[\n" + source + "\n\\]"
+            document = (r"\documentclass[12pt]{article}" + "\n" +
+                        r"\usepackage[margin=12mm]{geometry}" + "\n" +
+                        r"\usepackage{amsmath,amssymb,bm}" + "\n" +
+                        r"\pagestyle{empty}" + "\n" + r"\begin{document}" + "\n" +
+                        body + "\n" + r"\end{document}")
+        with tempfile.TemporaryDirectory(prefix="pycat_latex_") as directory:
+            tex_path = os.path.join(directory, "equation.tex")
+            with open(tex_path, "w", encoding="utf-8") as file:
+                file.write(document)
+            env = os.environ.copy()
+            env.update({"openin_any": "p", "openout_any": "p"})
+            result = subprocess.run(
+                [compiler, "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error", "equation.tex"],
+                cwd=directory, env=env, capture_output=True, text=True, errors="replace", timeout=30,
+            )
+            if result.returncode:
+                log = result.stdout + result.stderr
+                lines = log.splitlines()
+                index = next((i for i, line in enumerate(lines) if line.startswith("!")), max(0, len(lines) - 8))
+                raise ValueError("LaTeX compilation failed:\n" + "\n".join(lines[index:index + 8]))
+            if output_format == "pdf":
+                with open(os.path.join(directory, "equation.pdf"), "rb") as file:
+                    return file.read()
+            prefix = os.path.join(directory, "page")
+            result = subprocess.run(
+                [converter, "-png", "-r", "130", "-f", "1", "-l", "10",
+                 os.path.join(directory, "equation.pdf"), prefix],
+                capture_output=True, text=True, errors="replace", timeout=30,
+            )
+            if result.returncode:
+                raise ValueError("Could not render the LaTeX PDF:\n" + result.stderr[-800:])
+            names = sorted((name for name in os.listdir(directory) if re.fullmatch(r"page-\d+\.png", name)),
+                           key=lambda name: int(name[5:-4]))
+            images = []
+            for name in names:
+                with Image.open(os.path.join(directory, name)) as page:
+                    page = page.convert("RGB")
+                    box = ImageChops.difference(page, Image.new("RGB", page.size, "white")).getbbox()
+                    if box:
+                        images.append(ImageOps.expand(page.crop(box), border=16, fill="white"))
+            if not images:
+                raise ValueError("LaTeX produced no visible content.")
+            # Keep PDF page order and preserve gaps between pages in the preview.
+            width = max(page.width for page in images)
+            height = sum(page.height for page in images) + 12 * (len(images) - 1)
+            if width * height > 40_000_000:
+                raise ValueError("Preview is too large. Shorten the LaTeX document.")
+            combined = Image.new("RGB", (width, height), "white")
+            y = 0
+            for page in images:
+                combined.paste(page, (0, y))
+                y += page.height + 12
+            output = io.BytesIO()
+            combined.save(output, format="PNG")
+            return output.getvalue()
+
+    def _poll_latex(self, generation):
+        self._latex_poll_job = None
+        if not self._latex_future.done():
+            self._latex_poll_job = self.after(100, lambda: self._poll_latex(generation))
+            return
+        future = self._latex_future
+        self._latex_future = None
+        if generation != self._preview_generation:
+            return
+        try:
+            png = future.result()
+            self._equation_photo = tk.PhotoImage(master=self, data=base64.b64encode(png).decode("ascii"))
+            self.equation_canvas.create_image(8, 8, anchor="nw", image=self._equation_photo)
+            self.equation_canvas.configure(scrollregion=self.equation_canvas.bbox("all"))
+            self.equation_status.configure(text="Full LaTeX preview (up to 10 pages). Use Add or Update to save.", foreground="#27632a")
+        except ImportError:
+            self.equation_status.configure(text="Install image support: python -m pip install pillow", foreground="#a04020")
+        except subprocess.TimeoutExpired:
+            self.equation_status.configure(text="LaTeX preview timed out. Check or shorten the source.", foreground="#a04020")
+        except Exception as error:
+            self.equation_status.configure(text=str(error)[:700], foreground="#a04020")
+
+
+    def save_equation_pdf(self):
+        source = self.equation_text.get("1.0", "end-1c").strip()
+        if not source:
+            messagebox.showinfo(APP_TITLE, "Enter some text or an equation first.")
+            return
+        if self._pdf_future is not None:
+            messagebox.showinfo(APP_TITLE, "A PDF export is already running.")
+            return
+        title = self.ensure_compact_title()
+        if not title:
+            messagebox.showinfo(APP_TITLE, "Enter the entry title before saving its equations PDF.")
+            return
+        folder = self.entry_folder()
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as error:
+            messagebox.showerror(APP_TITLE, f"Could not create entry folder:\n{error}")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save text and equations as PDF", defaultextension=".pdf", initialdir=folder,
+            initialfile=self.safe_name(title, "Equation") + "-Equations.pdf",
+            filetypes=(("PDF document", "*.pdf"),),
+        )
+        if not path:
+            return
+        # Capture the current editor content; never export an outdated preview image.
+        renderer = self.renderer_var.get()
+        self._pdf_future = self._latex_executor.submit(self.render_pdf_to_file, source, renderer, path)
+        self.save_pdf_button.configure(state="disabled")
+        self.equation_status.configure(text="Creating PDF…", foreground="#555555")
+        self._pdf_poll_job = self.after(100, self._poll_pdf_export)
+
+    @staticmethod
+    def render_pdf_to_file(source, renderer, path):
+        if renderer == "Quick preview":
+            pdf = NMRCatalog.equation_png(source, output_format="pdf")
+        else:
+            pdf = NMRCatalog.full_latex_png(source, output_format="pdf", text_mode=renderer == "Text + equations")
+        # Replace only after rendering succeeds; keep an existing PDF on compiler errors.
+        descriptor, temporary = tempfile.mkstemp(prefix=".pycat_pdf_", suffix=".pdf",
+                                                dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(descriptor, "wb") as file:
+                file.write(pdf)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return path
+
+    def _poll_pdf_export(self):
+        self._pdf_poll_job = None
+        if not self._pdf_future.done():
+            self._pdf_poll_job = self.after(100, self._poll_pdf_export)
+            return
+        future = self._pdf_future
+        self._pdf_future = None
+        self.save_pdf_button.configure(state="normal" if self.fields["item_type"].get() in ("Paper", "Book", "Thesis", "Equation") else "disabled")
+        try:
+            path = future.result()
+            self.equation_status.configure(text="PDF saved. Use Add or Update to save the editable catalog entry.", foreground="#27632a")
+            messagebox.showinfo(APP_TITLE, "PDF saved:\n" + path)
+        except Exception as error:
+            self.equation_status.configure(text="PDF export failed.", foreground="#a04020")
+            messagebox.showerror(APP_TITLE, "Could not save the PDF:\n" + str(error))
 
     def values_from_form(self):
         values = {name: variable.get().strip() for name, variable in self.fields.items()}
+        values["equation_latex"] = self.equation_text.get("1.0", "end-1c").strip()
+        values["equation_renderer"] = self.renderer_var.get()
+        if values["item_type"] in ("Equation", "Image") and not values["title"]:
+            values["title"] = self.ensure_compact_title()
         values["notes"] = self.notes.get("1.0", "end").strip()
         return values
 
@@ -256,7 +669,17 @@ class NMRCatalog(tk.Tk):
         if not data["title"]:
             messagebox.showwarning(APP_TITLE, "Please enter a title.")
             return
-        data["notes_path"] = self.write_notes_file(data["notes"])
+        if data["item_type"] == "Equation" and not data["equation_latex"]:
+            messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
+            return
+        if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
+            messagebox.showwarning(APP_TITLE, "Please select an image using File or Images.")
+            return
+        try:
+            data = self.organize_entry_data(data)
+        except OSError as error:
+            messagebox.showerror(APP_TITLE, f"Could not store entry files:\n{error}")
+            return
         columns = tuple(data.keys())
         placeholders = ", ".join("?" for _ in columns)
         self.conn.execute(
@@ -276,7 +699,17 @@ class NMRCatalog(tk.Tk):
         if not data["title"]:
             messagebox.showwarning(APP_TITLE, "Please enter a title.")
             return
-        data["notes_path"] = self.write_notes_file(data["notes"])
+        if data["item_type"] == "Equation" and not data["equation_latex"]:
+            messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
+            return
+        if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
+            messagebox.showwarning(APP_TITLE, "Please select an image using File or Images.")
+            return
+        try:
+            data = self.organize_entry_data(data)
+        except OSError as error:
+            messagebox.showerror(APP_TITLE, f"Could not store entry files:\n{error}")
+            return
         assignments = ", ".join(f"{column} = ?" for column in data)
         self.conn.execute(
             f"UPDATE literature SET {assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -301,7 +734,13 @@ class NMRCatalog(tk.Tk):
         self.selected_id = None
         for name, variable in self.fields.items():
             variable.set("Paper" if name == "item_type" else "")
+        self.notes.configure(state="normal")
+        self.equation_text.configure(state="normal")
         self.notes.delete("1.0", "end")
+        self.equation_text.delete("1.0", "end")
+        self.renderer_var.set("Text + equations")
+        self.update_type_controls()
+        self.preview_equation()
         for selected in self.tree.selection():
             self.tree.selection_remove(selected)
 
@@ -316,7 +755,7 @@ class NMRCatalog(tk.Tk):
             field_map = {
                 "Title": ("title",), "Keywords": ("keywords",), "Author": ("authors", "corresponding_author"),
                 "Section": ("section",), "Subsection": ("subsection",),
-                "All fields": ("title", "authors", "corresponding_author", "author_email", "source", "doi_isbn", "keywords", "section", "subsection", "notes"),
+                "All fields": ("title", "authors", "corresponding_author", "author_email", "source", "doi_isbn", "keywords", "section", "subsection", "notes", "equation_latex"),
             }
             searchable = field_map[self.search_by_var.get()]
             sql += " AND (" + " OR ".join(f"{field} LIKE ?" for field in searchable) + ")"
@@ -381,64 +820,209 @@ class NMRCatalog(tk.Tk):
         if row:
             for name, variable in self.fields.items():
                 variable.set(row[name] or "")
+            self.notes.configure(state="normal")
+            self.equation_text.configure(state="normal")
             self.notes.delete("1.0", "end")
             self.notes.insert("1.0", row["notes"] or "")
+            self.equation_text.delete("1.0", "end")
+            self.equation_text.insert("1.0", row["equation_latex"] or "")
+            self.renderer_var.set(row["equation_renderer"] or "Quick preview")
+            self.update_type_controls()
+            self.preview_equation()
 
     def browse_file(self):
-        path = filedialog.askopenfilename(title="Select an NMR paper or book", filetypes=(("PDF files", "*.pdf"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(title="Select a document or image", filetypes=(("All supported files", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif"), ("PDF files", "*.pdf"), ("Image files", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif"), ("All files", "*.*")))
         if path:
             try:
+                self.ensure_compact_title(path)
                 stored_path = self.store_document(path, "PDF")
                 self.fields["file_link"].set(stored_path)
             except OSError as error:
                 messagebox.showerror(APP_TITLE, f"Could not store the document:\n{error}")
 
     def library_root(self):
-        row = self.conn.execute("SELECT value FROM settings WHERE name='library_root'").fetchone()
-        return row[0] if row else os.path.join(os.path.dirname(os.path.abspath(__file__)), "NMR_Library")
+        """The portable library always travels beside this Python file."""
+        return os.path.join(APP_DIRECTORY, "NMR_Library")
 
-    def choose_library_folder(self):
-        folder = filedialog.askdirectory(title="Choose the main NMR document folder", initialdir=self.library_root())
-        if folder:
-            self.conn.execute(
-                "INSERT INTO settings(name, value) VALUES('library_root', ?) "
-                "ON CONFLICT(name) DO UPDATE SET value=excluded.value", (folder,)
-            )
-            self.conn.commit()
-            messagebox.showinfo(APP_TITLE, f"New papers will be stored under:\n{folder}")
+    @staticmethod
+    def resolve_stored_path(path):
+        """Resolve a portable database path against the PyCat folder."""
+        path = (path or "").strip()
+        if not path or path.startswith(("http://", "https://")):
+            return path
+        expanded = os.path.expanduser(path)
+        foreign_windows_path = os.name != "nt" and bool(re.match(r"^[A-Za-z]:[\\/]", expanded))
+        foreign_posix_path = os.name == "nt" and expanded.startswith("/")
+        if foreign_windows_path or foreign_posix_path:
+            return expanded
+        if os.path.isabs(expanded):
+            return os.path.normpath(expanded)
+        return os.path.normpath(os.path.join(APP_DIRECTORY, *expanded.replace("\\", "/").split("/")))
+
+    @staticmethod
+    def portable_stored_path(path):
+        """Store paths inside the PyCat folder with forward slashes on every OS."""
+        path = (path or "").strip()
+        if not path or path.startswith(("http://", "https://")):
+            return path
+        expanded = os.path.expanduser(path)
+        foreign_windows_path = os.name != "nt" and bool(re.match(r"^[A-Za-z]:[\\/]", expanded))
+        foreign_posix_path = os.name == "nt" and expanded.startswith("/")
+        if foreign_windows_path or foreign_posix_path:
+            return path
+        absolute = NMRCatalog.resolve_stored_path(expanded)
+        try:
+            relative = os.path.relpath(absolute, APP_DIRECTORY)
+        except ValueError:  # Different Windows drives cannot be made relative.
+            return absolute
+        if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+            return absolute
+        return relative.replace(os.sep, "/")
+
+    def make_existing_paths_portable(self):
+        """Convert already-local absolute paths without moving or deleting files."""
+        columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path")
+        rows = self.conn.execute("SELECT id, " + ", ".join(columns) + " FROM literature").fetchall()
+        with self.conn:
+            for row in rows:
+                updates = {}
+                for key in columns:
+                    multiple = key in ("supplementary_paths", "image_paths")
+                    values = (row[key] or "").split("; ") if multiple else [row[key] or ""]
+                    converted = [self.portable_stored_path(value) for value in values]
+                    new_value = "; ".join(converted) if multiple else converted[0]
+                    if new_value != (row[key] or ""):
+                        updates[key] = new_value
+                if updates:
+                    assignments = ", ".join(f"{key}=?" for key in updates)
+                    self.conn.execute(f"UPDATE literature SET {assignments} WHERE id=?",
+                                      (*updates.values(), row["id"]))
 
     @staticmethod
     def safe_name(value, fallback):
-        value = re.sub(r"[^\w .()-]+", "_", value or "", flags=re.UNICODE).strip(" ._")
-        return value[:120] or fallback
+        value = unicodedata.normalize("NFC", value or "")
+        value = re.sub(r"[^\w .()-]+", "_", value, flags=re.UNICODE).strip(" ._")
+        value = value[:120] or fallback
+        reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                    *(f"LPT{i}" for i in range(1, 10))}
+        if value.split(".", 1)[0].upper() in reserved:
+            value = "_" + value
+        return value
+
+    def ensure_category_folders(self):
+        for name in CATEGORY_FOLDERS.values():
+            os.makedirs(os.path.join(self.library_root(), name), exist_ok=True)
+
+    @staticmethod
+    def folder_author(corresponding_author, authors):
+        """Prefer the corresponding author; preserve commas inside individual names."""
+        corresponding = (corresponding_author or "").strip()
+        if corresponding:
+            return corresponding
+        names = re.split(r";|\n|\s+and\s+", authors or "", flags=re.IGNORECASE)
+        return next((name.strip() for name in names if name.strip()), "")
 
     def entry_folder(self):
         return self.entry_folder_for(
             self.fields["section"].get(), self.fields["subsection"].get(),
-            self.fields["corresponding_author"].get(), self.fields["title"].get(),
+            self.folder_author(self.fields["corresponding_author"].get(), self.fields["authors"].get()),
+            self.fields["title"].get(), self.fields["item_type"].get(),
         )
 
-    def entry_folder_for(self, section, subsection, author, title):
-        parts = (
-            self.safe_name(section, "Unclassified"),
-            self.safe_name(subsection, "General"),
-            self.safe_name(author, "Unknown author"),
-            self.safe_name(title, "Untitled"),
+    def entry_folder_for(self, section, subsection, author, title, item_type="Paper"):
+        author = self.safe_name(author, "Unknown author")[:40]
+        title = self.safe_name(title, "Untitled")[:70]
+        return os.path.join(
+            self.library_root(), CATEGORY_FOLDERS.get(item_type, "Papers"),
+            self.safe_name(section, "Unclassified")[:45],
+            self.safe_name(subsection, "General")[:45],
+            f"{author}-{title}",
         )
-        return os.path.join(self.library_root(), *parts)
 
-    def write_notes_file(self, notes, section=None, subsection=None, author=None, title=None):
+    def write_notes_file(self, notes, section=None, subsection=None, author=None, title=None, item_type="Paper"):
         if section is None:
             folder = self.entry_folder()
         else:
-            folder = self.entry_folder_for(section, subsection, author, title)
+            folder = self.entry_folder_for(section, subsection, author, title, item_type)
         os.makedirs(folder, exist_ok=True)
         destination = os.path.join(folder, "Notes.txt")
         with open(destination, "w", encoding="utf-8") as file:
             file.write(notes or "")
             if notes and not notes.endswith("\n"):
                 file.write("\n")
+        return self.portable_stored_path(destination)
+
+    @staticmethod
+    def copy_to_entry(source, folder):
+        """Copy without removing originals; reuse identical files on repeated organization."""
+        source = NMRCatalog.resolve_stored_path(source)
+        os.makedirs(folder, exist_ok=True)
+        name = os.path.basename(source)
+        base, extension = os.path.splitext(name)
+        destination = os.path.join(folder, name)
+        counter = 2
+        while os.path.exists(destination):
+            if os.path.samefile(source, destination) or filecmp.cmp(source, destination, shallow=False):
+                return destination
+            destination = os.path.join(folder, f"{base}_{counter}{extension}")
+            counter += 1
+        shutil.copy2(source, destination)
         return destination
+
+    def organize_entry_data(self, data):
+        data = dict(data)
+        author = self.folder_author(data.get("corresponding_author"), data.get("authors"))
+        folder = self.entry_folder_for(data.get("section"), data.get("subsection"),
+                                      author, data.get("title"), data.get("item_type"))
+        os.makedirs(folder, exist_ok=True)
+        for key in ("file_link", "bibtex_path", "supplementary_paths", "image_paths"):
+            multiple = key in ("supplementary_paths", "image_paths")
+            paths = (data.get(key) or "").split("; ") if multiple else [data.get(key) or ""]
+            stored = []
+            for path in paths:
+                resolved = self.resolve_stored_path(path)
+                if path and os.path.isfile(resolved):
+                    path = self.portable_stored_path(self.copy_to_entry(resolved, folder))
+                stored.append(path)
+            data[key] = "; ".join(stored) if multiple else stored[0]
+        # Keep any notes edited externally, as well as catalog notes.
+        old_notes = data.get("notes_path")
+        resolved_notes = self.resolve_stored_path(old_notes)
+        if old_notes and os.path.isfile(resolved_notes):
+            data["notes_path"] = self.portable_stored_path(
+                self.copy_to_entry(resolved_notes, folder)
+            )
+        else:
+            data["notes_path"] = self.write_notes_file(data.get("notes", ""),
+                data.get("section") or "", data.get("subsection"), author,
+                data.get("title"), data.get("item_type"))
+        return data
+
+    def organize_existing_files(self):
+        """Reorganize stored attachments and persist their new paths together."""
+        try:
+            self.ensure_category_folders()
+            rows = self.conn.execute("SELECT * FROM literature").fetchall()
+            changed = 0
+            missing = 0
+            columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path")
+            with self.conn:
+                for row in rows:
+                    for key in columns:
+                        paths = (row[key] or "").split("; ") if key in ("supplementary_paths", "image_paths") else [row[key] or ""]
+                        missing += sum(bool(path) and not path.startswith(("https://", "http://"))
+                                       and not os.path.isfile(self.resolve_stored_path(path)) for path in paths)
+                    data = self.organize_entry_data(dict(row))
+                    self.conn.execute("UPDATE literature SET " + ", ".join(f"{key}=?" for key in columns) + " WHERE id=?",
+                                      (*[data[key] for key in columns], row["id"]))
+                    changed += 1
+            self.sync_csv()
+            self.clear_form()
+            self.refresh_table()
+            messagebox.showinfo(APP_TITLE, f"Organized {changed} entries into category / section / subsection / corresponding author-title.\n"
+                                f"Original files were kept. Missing file references: {missing}.")
+        except (OSError, sqlite3.Error) as error:
+            messagebox.showerror(APP_TITLE, f"Could not finish organizing files. Original files were kept.\n{error}")
 
     def store_document(self, source, kind="Document"):
         source = os.path.abspath(os.path.expanduser(source))
@@ -456,7 +1040,69 @@ class NMRCatalog(tk.Tk):
             counter += 1
         if not os.path.exists(destination):
             shutil.copy2(source, destination)
-        return destination
+        return self.portable_stored_path(destination)
+
+
+    def paste_bibtex_attachment(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Paste BibTeX")
+        dialog.geometry("720x470")
+        dialog.minsize(450, 300)
+        dialog.transient(self)
+        panel = ttk.Frame(dialog, padding=12)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="Paste your BibTeX below. Save attaches it as a .bib file to this entry.",
+                  wraplength=650).pack(anchor="w", pady=(0, 8))
+        body = ttk.Frame(panel)
+        body.pack(fill="both", expand=True)
+        editor = tk.Text(body, wrap="none", undo=True, font=("Courier", 11))
+        vertical = ttk.Scrollbar(body, orient="vertical", command=editor.yview)
+        horizontal = ttk.Scrollbar(body, orient="horizontal", command=editor.xview)
+        editor.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        editor.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+
+        def paste():
+            try:
+                editor.insert("insert", self.clipboard_get())
+            except tk.TclError:
+                messagebox.showinfo(APP_TITLE, "The clipboard contains no text.", parent=dialog)
+
+        def save():
+            raw = editor.get("1.0", "end-1c")
+            if not raw.strip():
+                messagebox.showwarning(APP_TITLE, "Paste some BibTeX first.", parent=dialog)
+                return
+            if not self.fields["title"].get().strip():
+                messagebox.showwarning(APP_TITLE, "Enter the entry title first, then paste its BibTeX.", parent=dialog)
+                return
+            try:
+                path = self.store_pasted_bibtex(raw)
+                self.fields["bibtex_path"].set(path)
+            except OSError as error:
+                messagebox.showerror(APP_TITLE, f"Could not save the BibTeX:\n{error}", parent=dialog)
+                return
+            dialog.destroy()
+            messagebox.showinfo(APP_TITLE, "BibTeX file attached. Click Add or Update to save the catalog entry.")
+
+        buttons = ttk.Frame(panel)
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Paste from clipboard", command=paste).pack(side="left")
+        ttk.Button(buttons, text="Save .bib", command=save).pack(side="right")
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=5)
+        dialog.grab_set()
+        editor.focus_set()
+
+    def store_pasted_bibtex(self, text):
+        # Preserve pasted braces, accents, commands and line breaks verbatim.
+        with tempfile.TemporaryDirectory(prefix="pycat_bib_") as directory:
+            source = os.path.join(directory, "reference.bib")
+            with open(source, "w", encoding="utf-8", newline="") as file:
+                file.write(text)
+            return self.store_document(source, "BibTeX")
 
     def browse_bibtex_attachment(self):
         path = filedialog.askopenfilename(title="Attach BibTeX", filetypes=(("BibTeX files", "*.bib"), ("All files", "*.*")))
@@ -487,19 +1133,30 @@ class NMRCatalog(tk.Tk):
         if not paths:
             return
         try:
+            self.ensure_compact_title(paths[0])
             stored = [self.store_document(path, "Image") for path in paths]
-            self.fields["image_paths"].set("; ".join(stored))
+            existing = [p for p in self.fields["image_paths"].get().split("; ") if p]
+            self.fields["image_paths"].set("; ".join(dict.fromkeys([*existing, *stored])))
         except OSError as error:
             messagebox.showerror(APP_TITLE, f"Could not store the images:\n{error}")
 
     def open_selected_file(self):
+        if self.fields["item_type"].get() == "Equation":
+            self.tabs.select(1)
+            self.preview_equation(compile_full=True)
+            self.equation_text.focus_set()
+            return
+        if self.fields["item_type"].get() == "Image" and not self.fields["file_link"].get().strip():
+            self.open_images()
+            return
         value = self.fields["file_link"].get().strip()
         if not value:
-            messagebox.showinfo(APP_TITLE, "This entry has no PDF path or web link.")
+            messagebox.showinfo(APP_TITLE, "This entry has no file path or web link.")
             return
         try:
-            if value.startswith(("http://", "https://")) or os.path.exists(os.path.expanduser(value)):
-                open_with_system(value)
+            resolved = self.resolve_stored_path(value)
+            if value.startswith(("http://", "https://")) or os.path.exists(resolved):
+                open_with_system(resolved)
             else:
                 messagebox.showerror(APP_TITLE, "The saved file path does not exist.")
         except Exception as error:
@@ -510,11 +1167,20 @@ class NMRCatalog(tk.Tk):
         if not selection:
             messagebox.showinfo(APP_TITLE, "Select an entry first.")
             return
-        row = self.conn.execute("SELECT file_link, supplementary_paths, bibtex_path, image_paths, notes_path FROM literature WHERE id=?", (int(selection[0]),)).fetchone()
+        row = self.conn.execute("SELECT * FROM literature WHERE id=?", (int(selection[0]),)).fetchone()
+        folder = self.entry_folder_for(row["section"], row["subsection"],
+            self.folder_author(row["corresponding_author"], row["authors"]), row["title"], row["item_type"])
+        if os.path.isdir(folder):
+            try:
+                open_with_system(folder)
+            except Exception as error:
+                messagebox.showerror(APP_TITLE, f"Could not open the entry folder:\n{error}")
+            return
         candidates = [row["file_link"], row["bibtex_path"], row["notes_path"]]
         candidates.extend((row["supplementary_paths"] or "").split("; "))
         candidates.extend((row["image_paths"] or "").split("; "))
-        existing = next((path for path in candidates if path and os.path.exists(path)), None)
+        existing = next((self.resolve_stored_path(path) for path in candidates
+                         if path and os.path.exists(self.resolve_stored_path(path))), None)
         if not existing:
             messagebox.showinfo(APP_TITLE, "No stored local document was found for this entry.")
             return
@@ -534,7 +1200,8 @@ class NMRCatalog(tk.Tk):
             return
         row = self.conn.execute("SELECT supplementary_paths FROM literature WHERE id=?", (int(selection[0]),)).fetchone()
         paths = [path for path in (row["supplementary_paths"] or "").split("; ") if path]
-        existing = [path for path in paths if os.path.exists(os.path.expanduser(path))]
+        existing = [self.resolve_stored_path(path) for path in paths
+                    if os.path.exists(self.resolve_stored_path(path))]
         if not existing:
             messagebox.showinfo(APP_TITLE, "This entry has no stored supplementary files.")
             return
@@ -550,12 +1217,13 @@ class NMRCatalog(tk.Tk):
             messagebox.showinfo(APP_TITLE, "Select an entry first.")
             return
         row = self.conn.execute("SELECT * FROM literature WHERE id=?", (int(selection[0]),)).fetchone()
-        path = row["notes_path"]
-        if not path or not os.path.exists(path):
+        stored_path = row["notes_path"]
+        path = self.resolve_stored_path(stored_path)
+        if not stored_path or not os.path.exists(path):
             try:
                 path = self.write_notes_file(
                     row["notes"] or "", row["section"], row["subsection"],
-                    row["corresponding_author"], row["title"],
+                    self.folder_author(row["corresponding_author"], row["authors"]), row["title"], row["item_type"],
                 )
                 self.conn.execute("UPDATE literature SET notes_path=? WHERE id=?", (path, int(selection[0])))
                 self.conn.commit()
@@ -564,7 +1232,7 @@ class NMRCatalog(tk.Tk):
                 messagebox.showerror(APP_TITLE, f"Could not create Notes.txt:\n{error}")
                 return
         try:
-            open_with_system(path)
+            open_with_system(self.resolve_stored_path(path))
         except Exception as error:
             messagebox.showerror(APP_TITLE, f"Could not open Notes.txt:\n{error}")
 
@@ -574,8 +1242,9 @@ class NMRCatalog(tk.Tk):
             messagebox.showinfo(APP_TITLE, "Select an entry first.")
             return
         row = self.conn.execute(f"SELECT {column} FROM literature WHERE id=?", (int(selection[0]),)).fetchone()
-        path = row[column] or ""
-        if not path or not os.path.exists(os.path.expanduser(path)):
+        stored_path = row[column] or ""
+        path = self.resolve_stored_path(stored_path)
+        if not stored_path or not os.path.exists(path):
             messagebox.showinfo(APP_TITLE, f"This entry has no stored {label} file.")
             return
         try:
@@ -585,7 +1254,7 @@ class NMRCatalog(tk.Tk):
 
     def sync_csv(self):
         """Keep a spreadsheet-readable catalog synchronized automatically."""
-        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes")
+        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer")
         rows = self.conn.execute(f"SELECT {', '.join(columns)} FROM literature ORDER BY title").fetchall()
         try:
             temporary = AUTO_CSV_PATH + ".tmp"
@@ -698,7 +1367,7 @@ class NMRCatalog(tk.Tk):
                 if duplicate:
                     skipped += 1
                     continue
-                source = bib.get("journal") or bib.get("booktitle") or bib.get("publisher", "")
+                source = bib.get("journal") or bib.get("booktitle") or bib.get("publisher") or bib.get("school") or bib.get("institution", "")
                 volume_data = ", ".join(filter(None, (bib.get("volume"), bib.get("number"), bib.get("pages"))))
                 file_link = bib.get("file") or bib.get("url", "")
                 if file_link and ":" in file_link and not file_link.startswith(("http://", "https://")):
@@ -706,6 +1375,9 @@ class NMRCatalog(tk.Tk):
                     file_link = candidates[0] if candidates else file_link
                 author_text = bib.get("author", "")
                 corresponding = author_text.split(" and ")[0] if author_text else ""
+                item_type = "Book" if entry_type in ("book", "inbook") else "Thesis" if entry_type in ("phdthesis", "mastersthesis", "thesis") else "Paper"
+                self.fields["item_type"].set(item_type)
+                self.fields["authors"].set(author_text.replace(" and ", "; "))
                 self.fields["section"].set(section)
                 self.fields["subsection"].set("")
                 self.fields["corresponding_author"].set(corresponding)
@@ -714,9 +1386,9 @@ class NMRCatalog(tk.Tk):
                     file_link = self.store_document(file_link, "PDF")
                 stored_bib = self.store_bibtex_entry(path, title, entry_type, bib)
                 notes = bib.get("note") or bib.get("abstract", "")
-                notes_path = self.write_notes_file(notes, section, "", corresponding, title)
+                notes_path = self.write_notes_file(notes, section, "", self.folder_author(corresponding, author_text), title, item_type)
                 values = (
-                    "Book" if entry_type in ("book", "inbook") else "Paper",
+                    item_type,
                     title,
                     author_text.replace(" and ", "; "),
                     bib.get("year", ""), source, volume_data, doi_isbn,
@@ -743,7 +1415,7 @@ class NMRCatalog(tk.Tk):
             for name, value in fields.items():
                 file.write(f"  {name} = {{{value}}},\n")
             file.write("}\n")
-        return destination
+        return self.portable_stored_path(destination)
 
     def sort_table(self, column, reverse):
         rows = [(self.tree.set(item, column), item) for item in self.tree.get_children("")]
@@ -753,11 +1425,16 @@ class NMRCatalog(tk.Tk):
         self.tree.heading(column, command=lambda: self.sort_table(column, not reverse))
 
     def close_app(self):
+        if self._preview_job is not None:
+            self.after_cancel(self._preview_job)
+        if self._latex_poll_job is not None:
+            self.after_cancel(self._latex_poll_job)
+        if self._pdf_poll_job is not None:
+            self.after_cancel(self._pdf_poll_job)
+        self._latex_executor.shutdown(wait=False, cancel_futures=True)
         self.conn.close()
         self.destroy()
 
 
 if __name__ == "__main__":
     NMRCatalog().mainloop()
-
-
