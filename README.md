@@ -1,153 +1,547 @@
-# PyCat NMR
+# PyCat NMR v1.0.0
 
-### Python Catalog for NMR
+PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
+theses, notes, images, equations, BibTeX records, and supplementary material. It uses
+Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
-PyCat NMR is a cross-platform desktop application for organizing NMR papers and books. It stores bibliographic information in a local SQLite database, organizes PDFs and related files into a structured library, and provides fast searching by title, author, keyword, section, and subsection.
-
-The application works locally on Windows, macOS, and Linux. No internet connection is required for its cataloging features.
+**Author:** Vineeth Francis Thalakottoor  
+**Contact:** vineeth.thalakottoor@cea.fr
 
 ## Features
 
-- Catalog NMR papers and books
-- Import one or many references from BibTeX files
-- Store titles, authors, years, journals, publishers, DOI, ISBN, and keywords
-- Record corresponding-author names and email addresses
-- Add editable notes to each reference
-- Automatically create a readable `Notes.txt` file
-- Attach PDFs, BibTeX files, and images
-- Open PDFs, BibTeX files, notes, and entry folders from the application
-- Organize files by section, subsection, corresponding author, and title
-- Search by title, author, keyword, section, or subsection
-- Filter papers and books separately
-- Use linked Section and Subsection dropdown filters
-- Automatically maintain a spreadsheet-readable CSV catalog
-- Preserve all catalog information in a local SQLite database
+- Seven entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Note**,
+  **Image**, and **Equation**.
+- Search by title, author, keyword, section, subsection, or all fields.
+- Filters for entry type, section, and subsection.
+- Attach a local PDF, supplementary files, BibTeX, and images by file selection
+  or drag-and-drop.
+- Attach BibTeX from an existing `.bib` file or paste BibTeX directly into
+  PyCat.
+- Editable notes for every entry type, also saved as `Notes.txt`.
+- Equation editor for Papers, Books, Manuals, Theses, Notes, and Equation entries.
+- Quick equation preview, full LaTeX preview, mixed text and equations, and PDF
+  export.
+- Separate storage and opening of the main literature PDF and the exported
+  LaTeX/equation PDF.
+- Automatic CSV synchronization in `PyCat_NMR_Catalog.csv`.
+- Portable relative paths for moving the complete PyCat folder between
+  computers or using it from a USB drive.
 
-## Library structure
+## Files and folders
 
-Uploaded files are organized using the following structure:
+Keep the complete PyCat directory together:
+
+```text
+PyCat/
+├── PyCat_NMR_v1.0.0.py
+├── README_v1.0.0.md
+├── nmr_catalog.db
+├── PyCat_NMR_Catalog.csv
+└── NMR_Library/
+    ├── Papers/
+    ├── Books/
+    ├── Thesis/
+    ├── Manuals/
+    ├── Notes/
+    ├── Images/
+    └── Equations/
+```
+
+Each catalog item is organized as:
 
 ```text
 NMR_Library/
-└── Section/
-    └── Subsection/
-        └── Corresponding author/
-            └── Paper or book title/
-                ├── paper.pdf
+└── Category/
+    └── Section/
+        └── Subsection/
+            └── Corresponding author-Title/
+                ├── main-document.pdf
                 ├── reference.bib
                 ├── Notes.txt
-                └── attached-images
+                ├── supplementary-files
+                ├── attached-images
+                └── Title-Equations.pdf
 ```
+
+The final folder uses the corresponding author. If that field is empty, PyCat
+uses the first author in **Authors**. If both fields are empty, it uses
+`Unknown author`.
 
 ## Requirements
 
-- Python 3.9 or later
-- Tkinter
+- Python 3.10 or newer is recommended.
+- Tkinter for the desktop interface.
+- Matplotlib for quick equation preview.
+- Pillow for full LaTeX preview image processing.
+- Optional: tkinterdnd2 for dragging PDFs, supplementary files, BibTeX, and
+  images from the desktop into PyCat.
+- Optional: a LaTeX distribution and Poppler for Full LaTeX preview and PDF
+  export in `Text + equations` or `Full LaTeX` mode.
 
-All other modules used by the current version are included with Python's standard library.
+The Python packages installed with `pip` are:
 
-## Installation
-
-### Ubuntu or Debian
-
-```bash
-sudo apt update
-sudo apt install python3 python3-tk
+```text
+matplotlib
+pillow
+tkinterdnd2
 ```
 
-### Fedora, AlmaLinux, or RHEL
+SQLite, CSV, and Tkinter interfaces are used from Python's standard library,
+although some Linux distributions package Tkinter separately.
+
+## Linux installation
+
+The following commands are suitable for Ubuntu and Debian-based systems.
+
+1. Open a terminal and install Python virtual-environment and Tkinter support:
+
+   ```bash
+   sudo apt update
+   sudo apt install python3 python3-venv python3-tk
+   ```
+
+2. Go to the PyCat folder. Quote the path if it contains spaces:
+
+   ```bash
+   cd ~/Documents/LSDRM/Bibliography/PyCat
+   ```
+
+3. Create a local virtual-environment folder and an environment named `pycat`:
+
+   ```bash
+   mkdir -p ~/venv
+   python3 -m venv ~/venv/pycat
+   ```
+
+4. Activate it:
+
+   ```bash
+   source ~/venv/pycat/bin/activate
+   ```
+
+5. Install the Python dependencies:
+
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install matplotlib pillow tkinterdnd2
+   ```
+
+6. Optional: install Full LaTeX support:
+
+   ```bash
+   sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
+   ```
+
+7. Run PyCat:
+
+   ```bash
+   python PyCat_NMR_v1.0.0.py
+   ```
+
+For later sessions:
 
 ```bash
-sudo dnf install python3 python3-tkinter
+cd ~/Documents/LSDRM/Bibliography/PyCat
+source ~/venv/pycat/bin/activate
+python PyCat_NMR_v1.0.0.py
 ```
 
-### Windows
-
-Install Python from [python.org](https://www.python.org/downloads/) and enable **Add Python to PATH** during installation. Tkinter is included with the standard Windows Python installer.
-
-### macOS
-
-Install Python from [python.org](https://www.python.org/downloads/macos/). The standard installer includes Tkinter.
-
-## Running PyCat NMR
-
-Clone or download the repository, enter its directory, and run:
+Leave the virtual environment with:
 
 ```bash
-python3 NMR_Catalog.py
+deactivate
 ```
 
-On Windows, use:
+## Windows installation
+
+1. Install Python 3 from [python.org](https://www.python.org/downloads/windows/).
+   During installation, enable the Python launcher and Tcl/Tk support.
+
+2. Open PowerShell in the PyCat folder, or navigate to it:
+
+   ```powershell
+   cd "C:\Users\Vineeth\Documents\PyCat"
+   ```
+
+3. Create a local virtual-environment folder and an environment named `pycat`:
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\venv"
+   py -m venv "$env:USERPROFILE\venv\pycat"
+   ```
+
+4. Activate it in PowerShell:
+
+   ```powershell
+   & "$env:USERPROFILE\venv\pycat\Scripts\Activate.ps1"
+   ```
+
+   In Command Prompt instead, use:
+
+   ```bat
+   %USERPROFILE%\venv\pycat\Scripts\activate.bat
+   ```
+
+5. Install the Python dependencies:
+
+   ```powershell
+   python -m pip install --upgrade pip
+   python -m pip install matplotlib pillow tkinterdnd2
+   ```
+
+6. Optional: install MiKTeX or TeX Live for Full LaTeX and install Poppler so
+   `pdflatex` and `pdftoppm` are available on `PATH`.
+
+7. Run PyCat:
+
+   ```powershell
+   python PyCat_NMR_v1.0.0.py
+   ```
+
+If PowerShell blocks activation, either use Command Prompt with
+`activate.bat`, or run PyCat without activation by calling the environment's
+interpreter directly:
 
 ```powershell
-py NMR_Catalog.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v1.0.0.py
 ```
 
-## Using the catalog
+## macOS installation
 
-1. Open the **Upload / Edit** tab.
-2. Enter the paper or book information.
-3. Choose a Section and Subsection.
-4. Attach the PDF, BibTeX file, or images if available.
-5. Add keywords and notes.
-6. Click **Add**.
+1. Install a current Python 3 distribution from
+   [python.org](https://www.python.org/downloads/macos/). The python.org macOS
+   installer includes Tk support.
 
-To modify an entry, select it in **Search Library**, click **Edit Selected**, make the changes, and click **Update**.
+2. Open Terminal and go to the PyCat folder:
 
-## BibTeX import
+   ```bash
+   cd ~/Documents/PyCat
+   ```
 
-Click **Import BibTeX** and select a `.bib` file. PyCat NMR reads common bibliographic fields, including:
+3. Create a local virtual-environment folder, create an environment named
+   `pycat`, and activate it:
 
-- Title
-- Authors
-- Year
-- Journal, book title, or publisher
-- Volume, issue, and pages
-- DOI or ISBN
-- Keywords
-- Abstract or notes
+   ```bash
+   mkdir -p ~/venv
+   python3 -m venv ~/venv/pycat
+   source ~/venv/pycat/bin/activate
+   ```
 
-Duplicate entries are detected using the title or DOI.
+4. Install the Python dependencies:
 
-## Search and filtering
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install matplotlib pillow tkinterdnd2
+   ```
 
-The catalog supports free-text searching and field-specific searching. The Section dropdown contains all created sections. After selecting a section, the Subsection dropdown shows only subsections belonging to it.
+5. Optional: install MacTeX for Full LaTeX. If Homebrew is installed, install
+   Poppler with:
 
-## Data files
+   ```bash
+   brew install poppler
+   ```
 
-PyCat NMR creates the following files beside the program:
+6. Run PyCat:
 
-- `nmr_catalog.db` — primary SQLite database
-- `PyCat_NMR_Catalog.csv` — automatically synchronized catalog table
-- `NMR_Library/` — default document library
+   ```bash
+   python PyCat_NMR_v1.0.0.py
+   ```
 
-The `.db` file is a binary SQLite database and should not be opened or edited with a normal text editor.
+## Important virtual-environment rule
 
-## Backups
+A virtual environment contains operating-system-specific executables and
+absolute interpreter paths. **Do not copy a virtual environment between Linux,
+Windows, and macOS.** Create a separate local environment named `pycat` on each
+computer. Keeping it in the computer's local `venv` folder means it does not
+travel with or clutter the portable PyCat folder.
 
-Back up the following items together:
+If PyCat is on a USB drive, a convenient approach is:
+
+```text
+Linux/macOS internal drive: ~/venv/pycat
+Windows internal drive:     %USERPROFILE%\venv\pycat
+USB drive: PyCat_NMR_v1.0.0.py, database, CSV, and NMR_Library
+```
+
+You do not have to activate a virtual environment if you call its Python
+interpreter directly.
+
+## Running from a USB drive
+
+For use across Linux, Windows, and macOS:
+
+1. Format the drive as **exFAT**.
+2. Copy the complete `PyCat` folder to the drive.
+3. Before the first move, run PyCat and click **Organize Files** so externally
+   linked files are copied into `NMR_Library`.
+4. Close PyCat before ejecting the drive.
+5. On each computer, run the script using that computer's Python environment.
+
+PyCat stores files inside its directory using relative paths such as:
+
+```text
+NMR_Library/Papers/NMR/Relaxation/Author-Title/paper.pdf
+```
+
+Therefore, changing a Windows USB drive letter or a Linux/macOS mount location
+does not break organized file links.
+
+Do not run the same database simultaneously from two computers, and never
+disconnect the drive while PyCat is open. SQLite may be writing to the database
+at that moment.
+
+## Adding an entry
+
+1. Open **Upload / Edit**.
+2. Select Paper, Book, Manual, Thesis, Note, Image, or Equation.
+3. Enter the required **Title**, **Section**, and **Subsection**. These three
+   fields are compulsory for every entry type.
+4. For Paper, Book, Manual, and Thesis, enter at least one name in **Authors**.
+   Authors are not required for Note, Image, or Equation. Corresponding author,
+   year, source, DOI/ISBN, and keywords remain optional.
+5. Enter the title, then select the PDF with **Select PDF...**, or drag one PDF
+   from the operating system's file manager onto **Drop PDF here**.
+6. Enter notes or equation content if required.
+7. Click **Add**.
+
+PyCat will not add or update an entry while a compulsory field is empty. Manual
+uses the same full metadata and attachment controls as Paper. For Note,
+only Title, Section, Subsection, Notes, and the equation editor remain active;
+enter at least a note or an equation. Image and Equation also disable fields
+that are not relevant. Titles are never generated automatically.
+
+## Editing or deleting an entry
+
+1. Select the entry under **Search Library**.
+2. Click **Edit Selected**.
+3. Make changes and click **Update**.
+
+To remove the database entry, click **Delete** and confirm. Review the files in
+the entry folder separately if you also want to remove stored attachments.
+
+## Adding multiple supplementary files
+
+There are two ways to add supplementary material:
+
+- Drag one or several files from the operating system's file manager onto
+  **Drop supplementary files here**.
+- Click **Supplement...**, hold `Ctrl` on Linux/Windows or `Command` on macOS,
+  select multiple files, and click **Open**. Use `Shift` to select a range.
+
+Then click **Add** for a new entry or **Update** for an existing entry.
+
+Dropping more files or clicking **Supplement...** again adds them without
+discarding existing ones. Duplicate stored locations are not added twice.
+Folders in a drop are skipped. **Open Supplementary** opens every available
+supplementary attachment in its default application. A ZIP file opens in the
+operating system's default archive manager; PyCat does not extract it
+automatically.
+
+## BibTeX
+
+There are two attachment methods:
+
+- **BibTeX...** selects an existing `.bib` file.
+- **Drop .bib here** accepts one `.bib` file dragged from the operating
+  system's file manager. If several files are dropped, PyCat uses the first.
+- **Paste...** opens an editor where BibTeX can be pasted and saved as a `.bib`
+  attachment.
+
+After selecting or dropping a `.bib` file, PyCat asks whether its metadata
+should fill the form. After any attachment method, click **Add** or **Update**
+to save the catalog entry.
+**Import BibTeX** can create multiple catalog entries from a BibTeX database;
+it asks for one compulsory Section and Subsection for the imported group.
+Entries without a title or author, and duplicate entries, are skipped.
+
+## Notes
+
+Notes are available for all seven entry types. PyCat stores the notes in the
+SQLite catalog and writes `Notes.txt` into the entry folder. Use **Open Notes**
+to open that file in the operating system's default text editor.
+
+## Equations, text, previews, and PDF export
+
+The equation editor is available for Papers, Books, Manuals, Theses, Notes, and Equation
+entries. It provides three modes:
+
+### Text + equations
+
+Write normal paragraphs with inline math between `$...$` and displayed math
+between `\[...\]`.
+
+```latex
+The magnetization $M_z$ approaches its equilibrium value $M_0$.
+
+\[
+\frac{dM_z}{dt}=-\frac{M_z-M_0}{T_1}
+\]
+
+Here, $T_1$ is the longitudinal relaxation time.
+```
+
+### Quick preview
+
+Use common LaTeX mathematics without a full LaTeX installation. Matplotlib's
+MathText renderer provides the preview.
+
+### Full LaTeX
+
+Use environments such as `align`, matrices, cases, or a complete LaTeX
+document. This mode requires `pdflatex`, `pdftoppm`, and Pillow.
+
+Click **Preview** to render the content. Click **Save PDF...** to export
+`Title-Equations.pdf`; the save dialog starts in the entry's own folder. PyCat
+stores this as a separate LaTeX PDF attachment, without replacing the paper,
+book, manual, or thesis PDF. Click **Open PDF** in the equation editor to open the
+current form's exported PDF. Under **Search Library**, select an entry and click
+**Open LaTeX PDF** to open it independently of **Open / View**, which opens the
+main literature PDF. Click **Add** or **Update** after exporting to retain the
+editable source and the LaTeX PDF location in the catalog.
+
+For files exported by an older PyCat version, v1.0.0 also checks the entry folder
+for the standard `Title-Equations.pdf` filename and records it automatically
+when opened.
+
+## PDF attachment and drag-and-drop
+
+The **PDF attachment** field stores only the location of a local PDF copied
+into the entry folder. It does not accept typed paths or web links. For a Paper,
+Book, or Thesis:
+
+1. Enter the title first so PyCat can create the correct Author-Title folder.
+2. Click **Select PDF...** and choose one PDF, or drag one PDF onto
+   **Drop PDF here**.
+3. Click **Add** or **Update** to save the catalog entry.
+
+Drag-and-drop requires `tkinterdnd2`. Without it, PyCat still works and shows
+the normal **Select PDF...** button. Install it in the active `pycat`
+environment with:
+
+```bash
+python -m pip install tkinterdnd2
+```
+
+## Images
+
+Use **Images...** to attach one or several images, or drag multiple image files
+onto **Drop images here**. PNG, JPEG, TIFF, BMP, GIF, and WebP are supported.
+Additional drops preserve images that are already attached, and duplicate
+stored locations are not added twice.
+**Open Images** launches saved images in the operating system's default image
+viewer.
+
+## Organize Files
+
+**Organize Files** processes every catalog entry. It:
+
+- Creates the Category/Section/Subsection/Author-Title structure.
+- Copies local main documents, supplementary files, BibTeX files, images, and
+  notes into the correct entry folder.
+- Updates the SQLite database and CSV with portable relative paths.
+- Preserves the original source files.
+- Reuses an identical destination file instead of creating a duplicate.
+- Reports references whose source files cannot be found.
+
+Run it after importing an older catalog, changing the folder conventions, or
+before moving PyCat to a USB drive.
+
+## Automatic database and CSV files
+
+- `nmr_catalog.db` is the authoritative SQLite catalog.
+- `PyCat_NMR_Catalog.csv` is updated automatically and can be opened in a
+  spreadsheet application.
+
+Do not edit the database while PyCat is running. The CSV is useful for reading
+and backup, but changes made directly to the CSV are not imported automatically.
+
+## Backup and safe use
+
+Regularly back up the complete PyCat folder, especially:
 
 ```text
 nmr_catalog.db
-PyCat_NMR_Catalog.csv
 NMR_Library/
 ```
 
-## Privacy
+Before copying, backing up, ejecting, or disconnecting the drive, close PyCat
+so SQLite can finish writing. The **Organize Files** operation copies rather
+than deletes originals, but a separate backup is still recommended.
 
-The current version stores its database, metadata, notes, and documents locally. It does not upload papers or catalog information to an online service.
+## Troubleshooting
 
-## Planned development
+### `externally-managed-environment`
 
-- Optional offline question answering for selected papers and books
-- OCR support for scanned documents
-- Equation and experimental-parameter extraction
-- Packaged installers for Windows, macOS, and Linux
+Your operating system protects its system Python. Create and activate the local
+`pycat` environment and install packages there; do not use
+`--break-system-packages` for PyCat.
 
-## Author
+### Find the local environment
 
-Vineeth Francis Thalakottoor
+On Linux or macOS:
 
-## License
+```bash
+ls -la ~/venv/pycat
+```
 
-No license has been selected yet. Add a license before encouraging external redistribution or contributions.
+On Windows PowerShell:
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\venv\pycat"
+```
+
+### Confirm which environment is active
+
+On Linux or macOS:
+
+```bash
+echo "$VIRTUAL_ENV"
+which python
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:VIRTUAL_ENV
+Get-Command python
+```
+
+### `No module named matplotlib`, `PIL`, or `tkinterdnd2`
+
+Activate the correct environment, then run:
+
+```bash
+python -m pip install matplotlib pillow tkinterdnd2
+```
+
+### Full LaTeX preview fails
+
+Check that these commands are available:
+
+```bash
+pdflatex --version
+pdftoppm -v
+```
+
+Full LaTeX is intentionally compiled with shell escape disabled. Correct any
+LaTeX syntax error displayed by PyCat and try Preview again.
+
+### A linked file cannot be found
+
+If it is still available, attach it again and click **Update**. Then use
+**Organize Files** to copy it into the portable library.
+
+### ZIP files do not open
+
+Assign a default archive application in the operating system. On Ubuntu or
+Debian, Archive Manager can be installed with:
+
+```bash
+sudo apt install file-roller
+```
+
+## References
+
+- [Python virtual environments](https://docs.python.org/3/library/venv.html)
+- [Python Packaging User Guide: venv and pip](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)
+- [Matplotlib: text rendering with LaTeX](https://matplotlib.org/stable/users/explain/text/usetex.html)
