@@ -45,13 +45,13 @@ _MATH_RENDER_LOCK = threading.RLock()
 
 CATEGORY_FOLDERS = {
     "Paper": "Papers", "Book": "Books", "Manual": "Manuals", "Thesis": "Thesis",
-    "Note": "Notes", "Image": "Images", "Equation": "Equations",
+    "Note": "Notes", "Image": "Images", "Equation": "Equations", "Lecture": "Lectures",
 }
 
-ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Note", "Image", "Equation")
+ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Note", "Image", "Equation")
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -118,6 +118,7 @@ class NMRCatalog(CatalogWindow):
                 corresponding_author TEXT,
                 author_email TEXT,
                 file_link TEXT,
+                lecture_pdf_paths TEXT,
                 supplementary_paths TEXT,
                 bibtex_path TEXT,
                 image_paths TEXT,
@@ -137,6 +138,7 @@ class NMRCatalog(CatalogWindow):
             "author_email": "TEXT", "supplementary_paths": "TEXT", "bibtex_path": "TEXT",
             "image_paths": "TEXT", "notes_path": "TEXT", "equation_latex": "TEXT",
             "equation_renderer": "TEXT", "equation_pdf_path": "TEXT",
+            "lecture_pdf_paths": "TEXT",
         }
         for column, data_type in migrations.items():
             if column not in existing:
@@ -213,6 +215,7 @@ class NMRCatalog(CatalogWindow):
         # Scroll metadata independently so Add/Update remain accessible on small screens.
         editor = ttk.Panedwindow(upload_tab, orient="horizontal")
         editor.pack(fill="both", expand=True)
+        self.editor = editor
         metadata = ttk.Frame(editor)
         editor.add(metadata, weight=3)
         form_canvas = tk.Canvas(metadata, highlightthickness=0, width=520)
@@ -226,12 +229,14 @@ class NMRCatalog(CatalogWindow):
         form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfigure(form_window, width=e.width))
         self.equation_panel = ttk.LabelFrame(editor, text="Equation editor", padding=12)
         editor.add(self.equation_panel, weight=2)
-        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, notes, images, and equations", padding=8)
+        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, lectures, notes, images, and equations", padding=8)
         table_frame.pack(fill="both", expand=True)
 
         self.fields = {}
         self.field_widgets = {}
+        self.field_labels = {}
         self.attachment_buttons = {}
+        self.attachment_actions = {}
         definitions = (
             ("item_type", "Type", ITEM_TYPES),
             ("title", "Title *", None),
@@ -246,33 +251,48 @@ class NMRCatalog(CatalogWindow):
             ("corresponding_author", "Corresponding author", None),
             ("author_email", "Author email", None),
             ("file_link", "PDF attachment", None),
+            ("lecture_pdf_paths", "Lecture PDFs", None),
             ("supplementary_paths", "Supplementary files", None),
             ("bibtex_path", "BibTeX attachment", None),
             ("image_paths", "Images", None),
         )
+        self.form = form
         for row, (key, label, choices) in enumerate(definitions):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=(0, 3))
+            row = row if key == "item_type" else row + 1
+            field_label = ttk.Label(form, text=label)
+            field_label.grid(row=row, column=0, sticky="w", pady=(0, 3))
+            self.field_labels[key] = field_label
             var = tk.StringVar(value="Paper" if key == "item_type" else "")
             self.fields[key] = var
-            if choices:
-                widget = ttk.Combobox(form, textvariable=var, values=choices, state="readonly")
+            if key == "item_type":
+                widget = ttk.Frame(form)
+                for index, choice in enumerate(choices):
+                    ttk.Radiobutton(widget, text=choice, variable=var, value=choice).grid(
+                        row=index // 4, column=index % 4, sticky="w", padx=(0, 12), pady=2)
             else:
-                widget = ttk.Entry(form, textvariable=var, state="readonly" if key == "file_link" else "normal")
+                widget = ttk.Entry(form, textvariable=var, state="readonly" if key in ("file_link", "lecture_pdf_paths") else "normal")
             self.field_widgets[key] = widget
-            widget.grid(row=row, column=1, sticky="ew", pady=(0, 8))
+            widget.grid(row=row, column=1, columnspan=2 if key == "item_type" else 1, sticky="ew", pady=(0, 8))
+
+        self.rearrange_authors_button = ttk.Button(
+            form, text="Rearrange authors", command=self.rearrange_authors
+        )
+        self.rearrange_authors_button.grid(row=3, column=2, padx=(6, 0), pady=(0, 8), sticky="w")
 
         # Stored separately from the main paper PDF. It is managed through the
         # equation editor and the dedicated Open LaTeX PDF buttons.
         self.fields["equation_pdf_path"] = tk.StringVar()
 
         for row, key, label, command in (
-            (12, "file_link", "Select PDF…", self.browse_file),
-            (13, "supplementary_paths", "Supplement…", self.browse_supplementary),
-            (14, "bibtex_path", "BibTeX…", self.browse_bibtex_attachment),
-            (15, "image_paths", "Images…", self.browse_images),
+            (13, "file_link", "Select PDF…", self.browse_file),
+            (14, "lecture_pdf_paths", "Select PDFs…", self.browse_lecture_pdfs),
+            (15, "supplementary_paths", "Supplement…", self.browse_supplementary),
+            (16, "bibtex_path", "BibTeX…", self.browse_bibtex_attachment),
+            (17, "image_paths", "Images…", self.browse_images),
         ):
             actions = ttk.Frame(form)
             actions.grid(row=row, column=2, padx=(6, 0), pady=(0, 8), sticky="w")
+            self.attachment_actions[key] = actions
             button = ttk.Button(actions, text=label, command=command)
             button.pack(side="left")
             self.attachment_buttons[key] = button
@@ -284,6 +304,13 @@ class NMRCatalog(CatalogWindow):
                     for target in (self.pdf_drop_target, self.field_widgets["file_link"]):
                         target.drop_target_register(DND_FILES)
                         target.dnd_bind("<<Drop>>", self.drop_pdf)
+            if key == "lecture_pdf_paths":
+                self.lecture_drop_target = ttk.Label(actions, text="Drop lecture PDFs here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2", relief="groove", padding=(8, 6))
+                self.lecture_drop_target.pack(side="left", padx=(5, 0))
+                if DND_AVAILABLE:
+                    for target in (self.lecture_drop_target, self.field_widgets[key]):
+                        target.drop_target_register(DND_FILES)
+                        target.dnd_bind("<<Drop>>", self.drop_lecture_pdfs)
             if key == "supplementary_paths":
                 drop_text = "Drop supplementary files here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
                 self.supplementary_drop_target = ttk.Label(
@@ -298,7 +325,7 @@ class NMRCatalog(CatalogWindow):
                 paste_button = ttk.Button(actions, text="Paste…", command=self.paste_bibtex_attachment)
                 paste_button.pack(side="left", padx=(4, 0))
                 self.attachment_buttons["bibtex_paste"] = paste_button
-                drop_text = "Drop .bib here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
+                drop_text = "Drop .bib/.bibtex here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
                 self.bibtex_drop_target = ttk.Label(actions, text=drop_text, relief="groove", padding=(8, 6))
                 self.bibtex_drop_target.pack(side="left", padx=(5, 0))
                 if DND_AVAILABLE:
@@ -313,11 +340,11 @@ class NMRCatalog(CatalogWindow):
                     for target in (self.images_drop_target, self.field_widgets["image_paths"]):
                         target.drop_target_register(DND_FILES)
                         target.dnd_bind("<<Drop>>", self.drop_images)
-        ttk.Label(form, text="Notes").grid(row=16, column=0, sticky="nw")
+        ttk.Label(form, text="Notes").grid(row=18, column=0, sticky="nw")
         self.notes = tk.Text(form, height=7, width=35, wrap="word")
-        self.notes.grid(row=16, column=1, columnspan=2, sticky="nsew")
+        self.notes.grid(row=18, column=1, columnspan=2, sticky="nsew")
         form.columnconfigure(1, weight=1)
-        form.rowconfigure(16, weight=1)
+        form.rowconfigure(18, weight=1)
 
         buttons = ttk.Frame(upload_tab)
         buttons.pack(fill="x", pady=(12, 0))
@@ -518,42 +545,31 @@ class NMRCatalog(CatalogWindow):
     def update_type_controls(self, *_args):
         self._preview_generation += 1
         kind = self.fields["item_type"].get()
-        compact = kind in ("Equation", "Image", "Note")
+        common = {"item_type", "title", "section", "subsection"}
+        literature = {"authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+                      "corresponding_author", "author_email", "file_link", "supplementary_paths",
+                      "bibtex_path", "image_paths"}
+        visible = common | ({"authors", "lecture_pdf_paths"} if kind == "Lecture" else
+                            {"image_paths"} if kind == "Image" else
+                            literature if kind in ("Paper", "Book", "Manual", "Thesis") else set())
         for key, widget in self.field_widgets.items():
-            if key == "item_type":
-                widget.configure(state="readonly")
-            elif key == "file_link":
-                # The primary document is selected or dropped, never typed as a URL.
-                widget.configure(state="readonly" if not compact else "disabled")
-            elif compact:
-                widget.configure(state="normal" if key in ("title", "section", "subsection") else "disabled")
+            if key in visible:
+                self.field_labels[key].grid()
+                widget.grid()
             else:
-                widget.configure(state="normal")
-        for key, button in self.attachment_buttons.items():
-            enabled = not compact or (kind == "Image" and key == "image_paths")
-            button.configure(state="normal" if enabled else "disabled")
-        if hasattr(self, "pdf_drop_target"):
-            self.pdf_drop_target.configure(
-                text=("Drop PDF here" if DND_AVAILABLE else "PDF drag-and-drop: install tkinterdnd2"),
-                state="normal" if not compact else "disabled",
-            )
-        if hasattr(self, "supplementary_drop_target"):
-            self.supplementary_drop_target.configure(
-                text=("Drop supplementary files here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
-                state="normal" if not compact else "disabled",
-            )
-        if hasattr(self, "bibtex_drop_target"):
-            self.bibtex_drop_target.configure(
-                text=("Drop .bib here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
-                state="normal" if not compact else "disabled",
-            )
-        if hasattr(self, "images_drop_target"):
-            self.images_drop_target.configure(
-                text=("Drop images here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"),
-                state="normal" if (not compact or kind == "Image") else "disabled",
-            )
+                self.field_labels[key].grid_remove()
+                widget.grid_remove()
+        for key, actions in self.attachment_actions.items():
+            (actions.grid if key in visible else actions.grid_remove)()
+        (self.rearrange_authors_button.grid if "authors" in visible else
+         self.rearrange_authors_button.grid_remove)()
         self.notes.configure(state="normal")
         equation_enabled = kind in ("Paper", "Book", "Manual", "Thesis", "Note", "Equation")
+        equation_pane = str(self.equation_panel)
+        if equation_enabled and equation_pane not in self.editor.panes():
+            self.editor.add(self.equation_panel, weight=2)
+        elif not equation_enabled and equation_pane in self.editor.panes():
+            self.editor.forget(self.equation_panel)
         self.equation_text.configure(state="normal" if equation_enabled else "disabled")
         self.renderer_combo.configure(state="readonly" if equation_enabled else "disabled")
         self.preview_button.configure(state="normal" if equation_enabled else "disabled")
@@ -795,7 +811,23 @@ class NMRCatalog(CatalogWindow):
 
     def values_from_form(self):
         values = {name: variable.get().strip() for name, variable in self.fields.items()}
+        kind = values["item_type"]
+        if kind == "Lecture":
+            for key in ("year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+                        "corresponding_author", "author_email", "file_link", "supplementary_paths",
+                        "bibtex_path", "image_paths", "equation_pdf_path"):
+                values[key] = ""
+        elif kind in ("Note", "Image", "Equation"):
+            for key in ("authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+                        "corresponding_author", "author_email", "supplementary_paths", "bibtex_path"):
+                values[key] = ""
+            if kind != "Image":
+                values["image_paths"] = values["file_link"] = ""
+        else:
+            values["lecture_pdf_paths"] = ""
         values["equation_latex"] = self.equation_text.get("1.0", "end-1c").strip()
+        if kind in ("Lecture", "Image"):
+            values["equation_latex"] = ""
         values["equation_renderer"] = self.renderer_var.get()
         values["notes"] = self.notes.get("1.0", "end").strip()
         return values
@@ -811,7 +843,7 @@ class NMRCatalog(CatalogWindow):
             if not data.get(key):
                 messagebox.showwarning(APP_TITLE, message)
                 return False
-        if data["item_type"] in ("Paper", "Book", "Manual", "Thesis") and not data.get("authors"):
+        if data["item_type"] in ("Paper", "Book", "Manual", "Thesis", "Lecture") and not data.get("authors"):
             messagebox.showwarning(APP_TITLE, "Please enter at least one author.")
             return False
         if data["item_type"] == "Equation" and not data["equation_latex"]:
@@ -985,6 +1017,43 @@ class NMRCatalog(CatalogWindow):
         if path:
             self.attach_pdf(path)
 
+    def browse_lecture_pdfs(self):
+        paths = filedialog.askopenfilenames(
+            title="Select lecture PDFs", filetypes=(("PDF documents", "*.pdf"),))
+        if paths:
+            self.attach_lecture_pdfs(paths)
+
+    def attach_lecture_pdfs(self, paths):
+        if self.fields["item_type"].get() != "Lecture":
+            return 0
+        if not self.fields["title"].get().strip():
+            messagebox.showinfo(APP_TITLE, "Enter the lecture title before attaching PDFs.")
+            return 0
+        valid = [os.path.abspath(os.path.expanduser(p)) for p in paths
+                 if os.path.isfile(os.path.expanduser(p)) and p.lower().endswith(".pdf")]
+        if not valid:
+            messagebox.showwarning(APP_TITLE, "Select one or more PDF files.")
+            return 0
+        try:
+            # Keep the source filenames so multiple lectures remain identifiable.
+            stored = [self.portable_stored_path(self.copy_to_entry(p, self.entry_folder())) for p in valid]
+            existing = [p for p in self.fields["lecture_pdf_paths"].get().split("; ") if p]
+            self.fields["lecture_pdf_paths"].set("; ".join(dict.fromkeys([*existing, *stored])))
+            if len(valid) != len(paths):
+                messagebox.showinfo(APP_TITLE, f"Added {len(valid)} PDF(s); skipped non-PDF items.")
+            return len(valid)
+        except OSError as error:
+            messagebox.showerror(APP_TITLE, f"Could not attach lecture PDFs:\n{error}")
+            return 0
+
+    def drop_lecture_pdfs(self, event):
+        try:
+            paths = list(self.tk.splitlist(event.data))
+        except (tk.TclError, TypeError):
+            paths = []
+        self.attach_lecture_pdfs(paths)
+        return "break"
+
     def attach_pdf(self, path):
         """Validate, copy and attach one local PDF to the current entry."""
         path = os.path.abspath(os.path.expanduser(path))
@@ -1063,13 +1132,13 @@ class NMRCatalog(CatalogWindow):
 
     def make_existing_paths_portable(self):
         """Convert already-local absolute paths without moving or deleting files."""
-        columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
+        columns = ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
         rows = self.conn.execute("SELECT id, " + ", ".join(columns) + " FROM literature").fetchall()
         with self.conn:
             for row in rows:
                 updates = {}
                 for key in columns:
-                    multiple = key in ("supplementary_paths", "image_paths")
+                    multiple = key in ("lecture_pdf_paths", "supplementary_paths", "image_paths")
                     values = (row[key] or "").split("; ") if multiple else [row[key] or ""]
                     converted = [self.portable_stored_path(value) for value in values]
                     new_value = "; ".join(converted) if multiple else converted[0]
@@ -1157,8 +1226,8 @@ class NMRCatalog(CatalogWindow):
         folder = self.entry_folder_for(data.get("section"), data.get("subsection"),
                                       author, data.get("title"), data.get("item_type"))
         os.makedirs(folder, exist_ok=True)
-        for key in ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "equation_pdf_path"):
-            multiple = key in ("supplementary_paths", "image_paths")
+        for key in ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths", "image_paths", "equation_pdf_path"):
+            multiple = key in ("lecture_pdf_paths", "supplementary_paths", "image_paths")
             paths = (data.get(key) or "").split("; ") if multiple else [data.get(key) or ""]
             stored = []
             for path in paths:
@@ -1187,11 +1256,11 @@ class NMRCatalog(CatalogWindow):
             rows = self.conn.execute("SELECT * FROM literature").fetchall()
             changed = 0
             missing = 0
-            columns = ("file_link", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
+            columns = ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path")
             with self.conn:
                 for row in rows:
                     for key in columns:
-                        paths = (row[key] or "").split("; ") if key in ("supplementary_paths", "image_paths") else [row[key] or ""]
+                        paths = (row[key] or "").split("; ") if key in ("lecture_pdf_paths", "supplementary_paths", "image_paths") else [row[key] or ""]
                         missing += sum(bool(path) and not path.startswith(("https://", "http://"))
                                        and not os.path.isfile(self.resolve_stored_path(path)) for path in paths)
                     data = self.organize_entry_data(dict(row))
@@ -1293,8 +1362,29 @@ class NMRCatalog(CatalogWindow):
                 file.write(text)
             return self.store_document(source, "BibTeX")
 
+    def rearrange_authors(self):
+        """Convert BibTeX 'Family, Given' names to 'Given Family' in the form."""
+        authors = self.fields["authors"].get()
+        if not authors.strip():
+            messagebox.showinfo(APP_TITLE, "Enter or import authors first.")
+            return
+        names = re.split(r"\s*;\s*|\s+and\s+|\n+", authors, flags=re.IGNORECASE)
+        rearranged = []
+        for name in names:
+            name = name.strip()
+            if not name:
+                continue
+            parts = [part.strip() for part in name.split(",")]
+            if len(parts) == 2 and all(parts):
+                name = f"{parts[1]} {parts[0]}"
+            elif len(parts) == 3 and all(parts):
+                # BibTeX also allows 'Family, Suffix, Given' (e.g. Smith, Jr, John).
+                name = f"{parts[2]} {parts[0]} {parts[1]}"
+            rearranged.append(name)
+        self.fields["authors"].set("; ".join(rearranged))
+
     def browse_bibtex_attachment(self):
-        path = filedialog.askopenfilename(title="Attach BibTeX", filetypes=(("BibTeX files", "*.bib"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(title="Attach BibTeX", filetypes=(("BibTeX files", "*.bib *.bibtex"), ("All files", "*.*")))
         if path:
             self.attach_bibtex_file(path)
 
@@ -1304,8 +1394,8 @@ class NMRCatalog(CatalogWindow):
         if not os.path.isfile(path):
             messagebox.showwarning(APP_TITLE, "The BibTeX item is not a file.")
             return False
-        if os.path.splitext(path)[1].lower() != ".bib":
-            messagebox.showwarning(APP_TITLE, "Only .bib files can be attached as BibTeX.")
+        if os.path.splitext(path)[1].lower() not in (".bib", ".bibtex"):
+            messagebox.showwarning(APP_TITLE, "Only .bib and .bibtex files can be attached as BibTeX.")
             return False
         try:
             self.fields["bibtex_path"].set(self.store_document(path, "BibTeX"))
@@ -1322,7 +1412,7 @@ class NMRCatalog(CatalogWindow):
             return False
 
     def drop_bibtex(self, event):
-        """Accept the first .bib file from a desktop file-manager drop."""
+        """Accept the first .bib or .bibtex file from a desktop file-manager drop."""
         try:
             paths = list(self.tk.splitlist(event.data))
         except (tk.TclError, TypeError):
@@ -1434,6 +1524,31 @@ class NMRCatalog(CatalogWindow):
         return "break"
 
     def open_selected_file(self):
+        if self.fields["item_type"].get() == "Lecture":
+            paths = [self.resolve_stored_path(p) for p in self.fields["lecture_pdf_paths"].get().split("; ") if p]
+            paths = [p for p in paths if os.path.isfile(p)]
+            if not paths:
+                messagebox.showinfo(APP_TITLE, "This lecture has no attached PDFs.")
+                return
+            if len(paths) == 1:
+                open_with_system(paths[0])
+                return
+            dialog = tk.Toplevel(self)
+            dialog.title("Open lecture PDF")
+            dialog.geometry("520x320")
+            files = tk.Listbox(dialog, exportselection=False)
+            files.pack(fill="both", expand=True, padx=12, pady=12)
+            for path in paths:
+                files.insert("end", os.path.basename(path))
+            files.selection_set(0)
+            def open_chosen(_event=None):
+                selected = files.curselection()
+                if selected:
+                    open_with_system(paths[selected[0]])
+                    dialog.destroy()
+            ttk.Button(dialog, text="Open selected PDF", command=open_chosen).pack(pady=(0, 12))
+            files.bind("<Double-1>", open_chosen)
+            return
         if self.fields["item_type"].get() in ("Equation", "Note"):
             self.tabs.select(1)
             self.preview_equation(compile_full=True)
@@ -1473,6 +1588,7 @@ class NMRCatalog(CatalogWindow):
             return
         candidates = [row["file_link"], row["bibtex_path"], row["notes_path"], row["equation_pdf_path"]]
         candidates.extend((row["supplementary_paths"] or "").split("; "))
+        candidates.extend((row["lecture_pdf_paths"] or "").split("; "))
         candidates.extend((row["image_paths"] or "").split("; "))
         existing = next((self.resolve_stored_path(path) for path in candidates
                          if path and os.path.exists(self.resolve_stored_path(path))), None)
@@ -1549,7 +1665,7 @@ class NMRCatalog(CatalogWindow):
 
     def sync_csv(self):
         """Keep a spreadsheet-readable catalog synchronized automatically."""
-        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer", "equation_pdf_path")
+        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "lecture_pdf_paths", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer", "equation_pdf_path")
         rows = self.conn.execute(f"SELECT {', '.join(columns)} FROM literature ORDER BY title").fetchall()
         try:
             temporary = AUTO_CSV_PATH + ".tmp"
@@ -1760,7 +1876,7 @@ class NMRCatalog(CatalogWindow):
         return True
 
     def import_bibtex(self):
-        path = filedialog.askopenfilename(title="Import BibTeX", filetypes=(("BibTeX files", "*.bib"), ("Text files", "*.txt"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(title="Import BibTeX", filetypes=(("BibTeX files", "*.bib *.bibtex"), ("Text files", "*.txt"), ("All files", "*.*")))
         if not path:
             return
         section = simpledialog.askstring(APP_TITLE, "Section / field for these entries (required):", parent=self)

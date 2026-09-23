@@ -1,7 +1,7 @@
-# PyCat NMR v1.0.0
+# PyCat NMR v1.0.2
 
 PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
-theses, notes, images, equations, BibTeX records, and supplementary material. It uses
+theses, lectures, notes, images, equations, BibTeX records, and supplementary material. It uses
 Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
 **Author:** Vineeth Francis Thalakottoor  
@@ -9,14 +9,16 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
 ## Features
 
-- Seven entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Note**,
+- Eight entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Lecture**, **Note**,
   **Image**, and **Equation**.
 - Search by title, author, keyword, section, subsection, or all fields.
 - Filters for entry type, section, and subsection.
 - Attach a local PDF, supplementary files, BibTeX, and images by file selection
   or drag-and-drop.
-- Attach BibTeX from an existing `.bib` file or paste BibTeX directly into
+- Attach BibTeX from an existing `.bib` or `.bibtex` file or paste BibTeX directly into
   PyCat.
+- Rearrange imported author names from `Family, Given` to `Given Family` with
+  the **Rearrange authors** button.
 - Editable notes for every entry type, also saved as `Notes.txt`.
 - Equation editor for Papers, Books, Manuals, Theses, Notes, and Equation entries.
 - Quick equation preview, full LaTeX preview, mixed text and equations, and PDF
@@ -33,8 +35,8 @@ Keep the complete PyCat directory together:
 
 ```text
 PyCat/
-├── PyCat_NMR_v1.0.0.py
-├── README_v1.0.0.md
+├── PyCat_NMR_v1.0.2.py
+├── README_v1.0.2.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
 └── NMR_Library/
@@ -42,6 +44,7 @@ PyCat/
     ├── Books/
     ├── Thesis/
     ├── Manuals/
+    ├── Lectures/
     ├── Notes/
     ├── Images/
     └── Equations/
@@ -135,7 +138,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 7. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v1.0.0.py
+   python PyCat_NMR_v1.0.2.py
    ```
 
 For later sessions:
@@ -143,7 +146,7 @@ For later sessions:
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
 source ~/venv/pycat/bin/activate
-python PyCat_NMR_v1.0.0.py
+python PyCat_NMR_v1.0.2.py
 ```
 
 Leave the virtual environment with:
@@ -195,7 +198,7 @@ deactivate
 7. Run PyCat:
 
    ```powershell
-   python PyCat_NMR_v1.0.0.py
+   python PyCat_NMR_v1.0.2.py
    ```
 
 If PowerShell blocks activation, either use Command Prompt with
@@ -203,7 +206,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v1.0.0.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v1.0.2.py
 ```
 
 ## macOS installation
@@ -244,7 +247,7 @@ interpreter directly:
 6. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v1.0.0.py
+   python PyCat_NMR_v1.0.2.py
    ```
 
 ## Important virtual-environment rule
@@ -260,7 +263,7 @@ If PyCat is on a USB drive, a convenient approach is:
 ```text
 Linux/macOS internal drive: ~/venv/pycat
 Windows internal drive:     %USERPROFILE%\venv\pycat
-USB drive: PyCat_NMR_v1.0.0.py, database, CSV, and NMR_Library
+USB drive: PyCat_NMR_v1.0.2.py, database, CSV, and NMR_Library
 ```
 
 You do not have to activate a virtual environment if you call its Python
@@ -293,12 +296,15 @@ at that moment.
 ## Adding an entry
 
 1. Open **Upload / Edit**.
-2. Select Paper, Book, Manual, Thesis, Note, Image, or Equation.
+2. Select a type from the visible choices: Paper, Book, Manual, Thesis, Lecture, Note, Image, or Equation. The form displays only fields relevant to that type.
 3. Enter the required **Title**, **Section**, and **Subsection**. These three
    fields are compulsory for every entry type.
-4. For Paper, Book, Manual, and Thesis, enter at least one name in **Authors**.
+4. For Paper, Book, Manual, Thesis, and Lecture, enter at least one name in **Authors**.
    Authors are not required for Note, Image, or Equation. Corresponding author,
    year, source, DOI/ISBN, and keywords remain optional.
+   For imported BibTeX authors such as `Li, Jing; Léonce, Estelle`, click
+   **Rearrange authors** to display `Jing Li; Estelle Léonce`. Review the
+   editable field, then click **Add** or **Update** to save the change.
 5. Enter the title, then select the PDF with **Select PDF...**, or drag one PDF
    from the operating system's file manager onto **Drop PDF here**.
 6. Enter notes or equation content if required.
@@ -306,9 +312,13 @@ at that moment.
 
 PyCat will not add or update an entry while a compulsory field is empty. Manual
 uses the same full metadata and attachment controls as Paper. For Note,
-only Title, Section, Subsection, Notes, and the equation editor remain active;
+only Title, Section, Subsection, Notes, and the equation editor remain visible;
 enter at least a note or an equation. Image and Equation also disable fields
 that are not relevant. Titles are never generated automatically.
+
+## Lectures with multiple PDFs
+
+Choose **Lecture** in **Upload / Edit**, then enter **Title**, **Authors**, **Section**, and **Subsection**. These four fields are required. Click **Select PDFs…** to select several PDF files at once (`Ctrl` or `Shift` on Linux/Windows, `Command` or `Shift` on macOS), or drop several PDFs onto **Drop lecture PDFs here**. Repeat either action to add more files, then click **Add** or **Update**. The selected PDFs are copied into `NMR_Library/Lectures/Section/Subsection/Author-Title/` with their original filenames. Non-PDF files are skipped. Under **Search Library**, select the lecture and click **Open / View** to choose one PDF; **Open Entry Folder** displays all files in the folder. Lecture PDF paths are stored separately from the single PDF used for papers, books, manuals, and theses. Notes are optional.
 
 ## Editing or deleting an entry
 
@@ -341,13 +351,13 @@ automatically.
 
 There are two attachment methods:
 
-- **BibTeX...** selects an existing `.bib` file.
-- **Drop .bib here** accepts one `.bib` file dragged from the operating
+- **BibTeX...** selects an existing `.bib` or `.bibtex` file.
+- **Drop .bib/.bibtex here** accepts one `.bib` or `.bibtex` file dragged from the operating
   system's file manager. If several files are dropped, PyCat uses the first.
 - **Paste...** opens an editor where BibTeX can be pasted and saved as a `.bib`
   attachment.
 
-After selecting or dropping a `.bib` file, PyCat asks whether its metadata
+After selecting or dropping a `.bib` or `.bibtex` file, PyCat asks whether its metadata
 should fill the form. After any attachment method, click **Add** or **Update**
 to save the catalog entry.
 **Import BibTeX** can create multiple catalog entries from a BibTeX database;
@@ -356,7 +366,7 @@ Entries without a title or author, and duplicate entries, are skipped.
 
 ## Notes
 
-Notes are available for all seven entry types. PyCat stores the notes in the
+Notes are available for all eight entry types. PyCat stores the notes in the
 SQLite catalog and writes `Notes.txt` into the entry folder. Use **Open Notes**
 to open that file in the operating system's default text editor.
 
@@ -399,7 +409,7 @@ current form's exported PDF. Under **Search Library**, select an entry and click
 main literature PDF. Click **Add** or **Update** after exporting to retain the
 editable source and the LaTeX PDF location in the catalog.
 
-For files exported by an older PyCat version, v1.0.0 also checks the entry folder
+For files exported by an older PyCat version, v1.0.2 also checks the entry folder
 for the standard `Title-Equations.pdf` filename and records it automatically
 when opened.
 
