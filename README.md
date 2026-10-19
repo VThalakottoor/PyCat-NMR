@@ -1,4 +1,4 @@
-# PyCat NMR v1.0.2
+# PyCat NMR v1.0.11
 
 PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
 theses, lectures, notes, images, equations, BibTeX records, and supplementary material. It uses
@@ -7,10 +7,165 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 **Author:** Vineeth Francis Thalakottoor  
 **Contact:** vineeth.thalakottoor@cea.fr
 
+## New in v1.0.11
+
+The LaTeX editor is **empty by default**, including new Report entries.
+
+- **Clear code** clears the LaTeX editor. Undo restores the cleared code.
+- **Insert default code** inserts the user's minimal report document at the
+  cursor, with Report title, Author name, today, report packages, optional
+  commented contents, and Introduction. It selects Full LaTeX internally.
+
+The inserted code is not automatically changed by title/author/date fields.
+Edit those commands directly in the code. Existing saved source still loads
+when selecting an entry. The general Clear button continues to clear the
+whole form; Clear code only clears the LaTeX editor.
+
+## New in v1.0.10
+
+Removed the heading, renderer-selection dropdown, and instructional paragraph
+above the LaTeX source editor. Preview and PDF export remain available. The
+renderer setting is retained internally for existing saved entries and the
+new Report default; no renderer selection is needed in the editor.
+
+## New in v1.0.9
+
+The default Report LaTeX is the requested minimal document: report packages,
+title, author, date, maketitle, optional commented table of contents, and one
+Introduction section. No abstract, sample equation, table, figure, or references
+are inserted. The **Example** and **Report template** buttons have been removed.
+Existing custom/saved code remains unchanged; the new default applies to new
+Reports with an empty LaTeX editor. Form metadata still fills title/author/date
+while the generated code is untouched.
+
+## Previous default in v1.0.8
+
+New Report entries start with a complete A4 LaTeX template. It includes report
+packages (geometry, amsmath, amssymb, bm, graphicx, booktabs, array, longtable,
+float, xcolor, hyperref), title/author/date, abstract, report sections, an equation,
+a table, a commented image example, and references. Full LaTeX mode is selected.
+The template compiles before any image is uploaded.
+
+Title, author, and date follow the form fields while the generated template
+is untouched. Once you edit the source yourself, changes to those fields no
+longer modify the code. Saved or custom LaTeX is never overwritten. The
+**Report template** button loads a fresh template into an empty LaTeX editor.
+
+## New in v1.0.7
+
+- Researchers now includes **Section** and **Subsection**, with the same
+  editable suggestions as other entries. Both are required when saving.
+- Removed **Insert image** from the plain-text and LaTeX editors. Use the
+  existing **Images…** upload field to attach files.
+- Uploaded images are stored in an **Images** subfolder inside the entry's
+  own folder, e.g. `NMR_Library/Reports/Section/Subsection/Author-Title/Images/`.
+- In LaTeX, refer to an uploaded image by its saved filename:
+
+```latex
+\includegraphics[width=0.8\linewidth]{measurement.png}
+```
+
+`Images/measurement.png` is also supported. Complete LaTeX documents need
+`\usepackage{graphicx}`; Text + equations mode includes it automatically.
+Preview and Save PDF both search the current entry's Images folder and its
+saved attachments. Check the Images field for the stored filename if a file
+was renamed during upload.
+
+Plain text does not embed new images; uploads remain attachments accessible
+through Open Images. Old image placeholders continue to render for compatibility.
+On Add / Update or Organize Files, existing attached images are copied into
+Images and their paths updated. Original files are preserved.
+
+## New in v1.0.6
+
+The type choices are now **Paper**, **Book**, **Manual**, **Thesis**,
+**Lecture notes**, **Conference**, **Report**, and **Researchers**.
+Note, Image, and Equation have been removed from the new-entry type choices.
+Existing records and attachment folders are preserved and remain visible
+under All in Search Library. Images and LaTeX remain available within the
+literature and report editors.
+
+Choose **Researchers** to enter:
+
+- **Name** (required)
+- **Website** (optional; click Open website to visit it)
+- **Plain text** (optional biography, research interests, contact details, etc.)
+
+Researchers require Section and Subsection as of v1.0.7; Authors are not required. Save with Add or
+Update; the text is searchable and also written to Notes.txt in the entry
+folder under NMR_Library/Researchers. Previous section/subsection suggestions
+and other literature functions are retained.
+
+## New in v1.0.5
+
+- Renamed the source tab to **LaTeX** and the rendered PDF tab to **LaTeX output**.
+- Section and Subsection in Upload / Edit now offer saved values in editable
+  dropdowns. Select an existing section to see its saved subsections, or type
+  new values. Leaving Section blank shows all existing subsections. Suggestions
+  refresh after saving, updating, deleting, or importing entries. Changing a
+  section does not erase a subsection you have already typed.
+
+## Editor layout
+
+The right-hand panel has two main tabs:
+
+- **LaTeX**: enter and edit LaTeX in **LaTeX code** (selected by default),
+  or switch to **Plain text** for ordinary notes. Existing content in both
+  editors remains available and is saved with Add / Update.
+- **LaTeX output**: displays the rendered document, with Previous / Next
+  page buttons. Click **Preview** from Notes to compile and switch to this view.
+  Click **Back to LaTeX** to continue editing. Save PDF and Open PDF remain
+  available in the source editor.
+
+For a complete report, open LaTeX → LaTeX code, select Full LaTeX, paste the
+complete document, and click Preview.
+
+## New in v1.0.3
+
+- Paper, Book, Manual, and Thesis retain their existing metadata, attachments,
+  BibTeX import, search, and export tools.
+- **Lecture notes** retains Lecture's multi-PDF upload and opening tools.
+  Existing database records and `Lectures` folders remain compatible.
+- **Conference** offers conference name, website, place, notes, and PDF upload.
+  Use **Open conference website** on the Upload / Edit tab.
+- **Report** offers title, authors, date (`YYYY-MM-DD`), image attachments,
+  notes, editable LaTeX source, and PDF export/opening. Title and authors are
+  required; date is optional. Section/subsection are optional for Conference
+  and Report; they retain their previous requirements for existing types.
+- Notes now sits on the **right-hand side**, beside a **LaTeX / equations** tab.
+  Both tabs preserve their content when switching and have PDF controls.
+- Notes and LaTeX documents support **up to 100 A4 pages**. Text flows onto
+  additional pages automatically; **New page** inserts an explicit break.
+  Preview compiles the document and displays one page at a time with
+  **Previous page / Next page**, including page 100. Documents over 100 pages
+  are rejected before export. Quick preview retains its existing MathText
+  behavior; choose Text + equations or Full LaTeX for A4 documents.
+- Previously, **Insert image…** attached an image and inserted it at the cursor (removed in v1.0.7). In Notes,
+  the editor shows an `[[image:...]]` placeholder, rendered as an image in the
+  PDF. In LaTeX, it inserts `\includegraphics`. PNG, JPEG, TIFF, BMP, GIF, and
+  WebP are converted to PNG for LaTeX; only the first frame is used for animated
+  images. Complete LaTeX documents must include `\usepackage{graphicx}`.
+- Notes is plain text: symbols such as `%`, `&`, and `$` are escaped for PDF
+  export. Use the LaTeX tab for equations. Its **Text + equations** mode accepts
+  paragraphs, `$inline math$`, `\[display math\]`, and LaTeX commands.
+- Notes PDFs use `Title-Notes.pdf`; LaTeX PDFs use `Title-Equations.pdf`.
+  The main uploaded PDF remains separately accessible. Click **Add / Update**
+  after exporting to record the PDF path and editable content.
+- Database columns are added automatically without removing existing records.
+
+### Updating
+
+Close PyCat and back up the complete existing PyCat folder. Replace its script
+with `PyCat_NMR.py` **in the same folder as `nmr_catalog.db` and `NMR_Library`**,
+then run `python PyCat_NMR.py`. Do not run the new script from Downloads if you
+want it to use your existing catalog. New Conferences and Reports folders are
+created automatically. Full LaTeX dependencies listed below are also needed
+for Notes PDF export.
+
 ## Features
 
-- Eight entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Lecture**, **Note**,
-  **Image**, and **Equation**.
+- Ten entry types: **Paper**, **Book**, **Manual**, **Thesis**, **Lecture**, **Note**,
+  **Image**, **Equation**, **Conference**, and **Report**. Lecture is displayed as **Lecture notes**.
 - Search by title, author, keyword, section, subsection, or all fields.
 - Filters for entry type, section, and subsection.
 - Attach a local PDF, supplementary files, BibTeX, and images by file selection
@@ -35,8 +190,8 @@ Keep the complete PyCat directory together:
 
 ```text
 PyCat/
-├── PyCat_NMR_v1.0.2.py
-├── README_v1.0.2.md
+├── PyCat_NMR.py
+├── README.md
 ├── nmr_catalog.db
 ├── PyCat_NMR_Catalog.csv
 └── NMR_Library/
@@ -44,6 +199,8 @@ PyCat/
     ├── Books/
     ├── Thesis/
     ├── Manuals/
+    ├── Conferences/
+    ├── Reports/
     ├── Lectures/
     ├── Notes/
     ├── Images/
@@ -138,7 +295,7 @@ The following commands are suitable for Ubuntu and Debian-based systems.
 7. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v1.0.2.py
+   python PyCat_NMR.py
    ```
 
 For later sessions:
@@ -146,7 +303,7 @@ For later sessions:
 ```bash
 cd ~/Documents/LSDRM/Bibliography/PyCat
 source ~/venv/pycat/bin/activate
-python PyCat_NMR_v1.0.2.py
+python PyCat_NMR.py
 ```
 
 Leave the virtual environment with:
@@ -198,7 +355,7 @@ deactivate
 7. Run PyCat:
 
    ```powershell
-   python PyCat_NMR_v1.0.2.py
+   python PyCat_NMR.py
    ```
 
 If PowerShell blocks activation, either use Command Prompt with
@@ -206,7 +363,7 @@ If PowerShell blocks activation, either use Command Prompt with
 interpreter directly:
 
 ```powershell
-& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR_v1.0.2.py
+& "$env:USERPROFILE\venv\pycat\Scripts\python.exe" PyCat_NMR.py
 ```
 
 ## macOS installation
@@ -247,7 +404,7 @@ interpreter directly:
 6. Run PyCat:
 
    ```bash
-   python PyCat_NMR_v1.0.2.py
+   python PyCat_NMR.py
    ```
 
 ## Important virtual-environment rule
@@ -263,7 +420,7 @@ If PyCat is on a USB drive, a convenient approach is:
 ```text
 Linux/macOS internal drive: ~/venv/pycat
 Windows internal drive:     %USERPROFILE%\venv\pycat
-USB drive: PyCat_NMR_v1.0.2.py, database, CSV, and NMR_Library
+USB drive: PyCat_NMR.py, database, CSV, and NMR_Library
 ```
 
 You do not have to activate a virtual environment if you call its Python
@@ -366,7 +523,7 @@ Entries without a title or author, and duplicate entries, are skipped.
 
 ## Notes
 
-Notes are available for all eight entry types. PyCat stores the notes in the
+Notes are available for all ten entry types in the right-hand Notes tab. PyCat stores the notes in the
 SQLite catalog and writes `Notes.txt` into the entry folder. Use **Open Notes**
 to open that file in the operating system's default text editor.
 
@@ -409,7 +566,7 @@ current form's exported PDF. Under **Search Library**, select an entry and click
 main literature PDF. Click **Add** or **Update** after exporting to retain the
 editable source and the LaTeX PDF location in the catalog.
 
-For files exported by an older PyCat version, v1.0.2 also checks the entry folder
+For files exported by an older PyCat version, v1.0.4 also checks the entry folder
 for the standard `Title-Equations.pdf` filename and records it automatically
 when opened.
 
