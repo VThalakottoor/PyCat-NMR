@@ -45,14 +45,14 @@ _MATH_RENDER_LOCK = threading.RLock()
 
 CATEGORY_FOLDERS = {
     "Paper": "Papers", "Book": "Books", "Manual": "Manuals", "Thesis": "Thesis",
-    "Note": "Notes", "Image": "Images", "Equation": "Equations", "Lecture": "Lectures", "Conference": "Conferences", "Report": "Reports", "Researchers": "Researchers",
+    "Note": "Notes", "Image": "Images", "Equation": "Equations", "Lecture": "Lectures", "Conference": "Conferences", "Report": "Reports", "Researchers": "Researchers", "Websites": "Websites",
 }
 
-ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Report", "Researchers")
-PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind != "Researchers") + ("Note", "Image", "Equation")
+ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Report", "Researchers", "Websites")
+PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Note", "Image", "Equation")
 
 
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.17"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -60,6 +60,120 @@ __email__ = "vineeth.thalakottoor@cea.fr"
 APP_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(APP_DIRECTORY, "nmr_catalog.db")
 AUTO_CSV_PATH = os.path.join(APP_DIRECTORY, "PyCat_NMR_Catalog.csv")
+
+SETUP_README = r"""PyCat NMR — Setup and use
+
+Keep PyCat_NMR.py, nmr_catalog.db, PyCat_NMR_Catalog.csv, and NMR_Library together.
+Install Python 3 before creating an environment. Internet access is required to
+download packages; the catalog works offline after setup.
+
+WINDOWS — COMMAND PROMPT (CMD)
+
+Create the environment once:
+
+    py -m venv "%USERPROFILE%\venvs\pycat"
+
+Activate it in each new CMD window:
+
+    call "%USERPROFILE%\venvs\pycat\Scripts\activate.bat"
+
+Install packages after activation:
+
+    python -m pip install --upgrade pip
+    python -m pip install --upgrade matplotlib pillow tkinterdnd2
+
+Go to your PyCat folder (replace this example with your actual path) and run:
+
+    cd /d "C:\path\to\PyCat"
+    python PyCat_NMR.py
+
+Leave the environment when finished:
+
+    deactivate
+
+These commands are for CMD. Windows Python should include Tcl/Tk support.
+
+LINUX — TERMINAL (UBUNTU / DEBIAN)
+
+Install the system prerequisites once:
+
+    sudo apt update
+    sudo apt install python3 python3-venv python3-tk
+
+Create the environment once:
+
+    python3 -m venv ~/venvs/pycat
+
+Activate it in each new terminal:
+
+    source ~/venvs/pycat/bin/activate
+
+Install packages after activation:
+
+    python -m pip install --upgrade pip
+    python -m pip install --upgrade matplotlib pillow tkinterdnd2
+
+Go to your PyCat folder (replace this example with your actual path) and run:
+
+    cd "/path/to/PyCat"
+    python PyCat_NMR.py
+
+Leave the environment when finished:
+
+    deactivate
+
+Other Linux distributions use their own package manager for system prerequisites.
+
+IMAGES — COPY FROM CLIPBOARD
+
+1. Enter the entry title and choose a type that supports image attachments.
+2. Copy an image or screenshot to the clipboard.
+3. Beside Images, click Copy from clipboard.
+4. Click Add or Update to save the catalog entry.
+
+Pasted images are saved as PNG files in the entry's Images folder. Repeated
+copies add images with distinct names and retain existing attachments.
+On Windows you can also copy image files in File Explorer.
+
+Linux clipboard access needs xclip for X11 or wl-paste for Wayland:
+
+    sudo apt install xclip wl-clipboard
+
+OPTIONAL — FULL LATEX AND PDF PREVIEW
+
+On Ubuntu/Debian:
+
+    sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
+
+On Windows install a LaTeX distribution (such as MiKTeX or TeX Live) and Poppler.
+Ensure pdflatex and pdftoppm are available on PATH, then restart PyCat.
+Catalog storage, plain text, and image attachments do not need LaTeX.
+
+PORTABLE USE
+
+Keep the Python environment on each computer and the whole PyCat folder on
+your USB drive. Use that computer's environment to run the USB copy.
+Close PyCat before backing up or ejecting the drive.
+
+DELETE UNUSED FOLDERS
+
+In Search Library, click Delete unused folders. Review the listed folders,
+then click Delete listed folders permanently to remove them and their contents.
+Cancel leaves them untouched. The full saved catalog is checked, including
+entries hidden by search filters. Active entry folders, referenced attachments,
+and the current upload form are protected. Loose files directly inside
+NMR_Library are left in place; cleanup removes unused folders only.
+
+After renaming an entry, save it with Update. Organize Files can move still-used
+attachments into their current entry folders before you run cleanup again.
+Unused empty categories are not recreated at startup.
+"""
+
+
+def normalize_search_text(value):
+    """Case-fold Unicode text and treat punctuation/symbols as word separators."""
+    text = unicodedata.normalize("NFC", value or "").casefold()
+    return " ".join(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
 
 
 def open_with_system(path_or_url):
@@ -102,6 +216,7 @@ class NMRCatalog(CatalogWindow):
         self.protocol("WM_DELETE_WINDOW", self.close_app)
 
     def _create_database(self):
+        self.conn.create_function("pycat_search", 1, normalize_search_text, deterministic=True)
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS literature (
@@ -155,6 +270,7 @@ class NMRCatalog(CatalogWindow):
         style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"))
         style.configure("Subtitle.TLabel", font=("Segoe UI", 10))
         style.configure("TButton", padding=(10, 6))
+        style.configure("Toolbar.TButton", padding=(5, 6))
         style.configure("Treeview", rowheight=27)
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
 
@@ -168,17 +284,18 @@ class NMRCatalog(CatalogWindow):
 
         search_frame = ttk.Frame(self, padding=(14, 0, 14, 10))
         search_frame.pack(fill="x")
-        ttk.Label(search_frame, text="Search:").pack(side="left", padx=(0, 5))
+        search_frame.columnconfigure(1, weight=1)
+        ttk.Label(search_frame, text="Search:").grid(row=0, column=0, padx=(0, 5))
         self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=32)
-        search_entry.pack(side="left")
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=22)
+        search_entry.grid(row=0, column=1, sticky="ew")
         search_entry.bind("<KeyRelease>", lambda _event: self.refresh_table())
         self.search_by_var = tk.StringVar(value="All fields")
         ttk.Combobox(
             search_frame, textvariable=self.search_by_var,
             values=("All fields", "Title", "Keywords", "Author", "Section", "Subsection"),
-            state="readonly", width=12,
-        ).pack(side="left", padx=(8, 0))
+            state="readonly", width=10,
+        ).grid(row=0, column=2, padx=(6, 0))
         self.search_by_var.trace_add("write", lambda *_args: self.refresh_table())
         self.filter_var = tk.StringVar(value="All")
         ttk.Combobox(
@@ -186,25 +303,29 @@ class NMRCatalog(CatalogWindow):
             textvariable=self.filter_var,
             values=("All", *("Lecture notes" if kind == "Lecture" else kind for kind in ITEM_TYPES)),
             state="readonly",
-            width=8,
-        ).pack(side="left", padx=(8, 0))
+            width=10,
+        ).grid(row=0, column=3, padx=(6, 0))
         self.filter_var.trace_add("write", lambda *_args: self.refresh_table())
 
-        ttk.Label(search_frame, text="Section:").pack(side="left", padx=(10, 4))
+        ttk.Label(search_frame, text="Section:").grid(row=0, column=4, padx=(8, 4))
         self.section_filter_var = tk.StringVar(value="All sections")
         self.section_filter_combo = ttk.Combobox(
-            search_frame, textvariable=self.section_filter_var, state="readonly", width=16,
+            search_frame, textvariable=self.section_filter_var, state="readonly", width=14,
         )
-        self.section_filter_combo.pack(side="left")
+        self.section_filter_combo.grid(row=0, column=5)
         self.section_filter_combo.bind("<<ComboboxSelected>>", self.on_section_filter_changed)
 
-        ttk.Label(search_frame, text="Subsection:").pack(side="left", padx=(8, 4))
+        ttk.Label(search_frame, text="Subsection:").grid(row=0, column=6, padx=(8, 4))
         self.subsection_filter_var = tk.StringVar(value="All subsections")
         self.subsection_filter_combo = ttk.Combobox(
-            search_frame, textvariable=self.subsection_filter_var, state="readonly", width=16,
+            search_frame, textvariable=self.subsection_filter_var, state="readonly", width=14,
         )
-        self.subsection_filter_combo.pack(side="left")
+        self.subsection_filter_combo.grid(row=0, column=7)
         self.subsection_filter_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_table())
+        ttk.Button(search_frame, text="Organize Files", command=self.organize_existing_files,
+                   style="Toolbar.TButton").grid(row=0, column=8, padx=(8, 0))
+        ttk.Button(search_frame, text="Delete unused folders…", command=self.preview_unused_folders,
+                   style="Toolbar.TButton").grid(row=0, column=9, padx=(5, 0))
 
         body = ttk.Notebook(self)
         body.pack(fill="both", expand=True, padx=14, pady=(0, 14))
@@ -213,6 +334,7 @@ class NMRCatalog(CatalogWindow):
         body.add(search_tab, text="Search Library")
         body.add(upload_tab, text="Upload / Edit")
         self.tabs = body
+        self._build_readme_tab(body)
 
         # Scroll metadata independently so Add/Update remain accessible on small screens.
         editor = ttk.Panedwindow(upload_tab, orient="horizontal")
@@ -231,7 +353,7 @@ class NMRCatalog(CatalogWindow):
         form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfigure(form_window, width=e.width))
         self.equation_panel = ttk.LabelFrame(editor, text="Notes and rendered PDF — up to 100 A4 pages", padding=12)
         editor.add(self.equation_panel, weight=2)
-        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, lecture notes, conferences, reports, and researchers", padding=8)
+        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites", padding=8)
         table_frame.pack(fill="both", expand=True)
 
         self.fields = {}
@@ -344,6 +466,7 @@ class NMRCatalog(CatalogWindow):
                         target.drop_target_register(DND_FILES)
                         target.dnd_bind("<<Drop>>", self.drop_bibtex)
             if key == "image_paths":
+                ttk.Button(actions, text="Copy from clipboard", command=self.copy_image_from_clipboard).pack(side="left", padx=(5, 0))
                 drop_text = "Drop images here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
                 self.images_drop_target = ttk.Label(actions, text=drop_text, relief="groove", padding=(8, 6))
                 self.images_drop_target.pack(side="left", padx=(5, 0))
@@ -366,7 +489,9 @@ class NMRCatalog(CatalogWindow):
         self.update_type_controls()
 
         columns = ("type", "title", "authors", "year", "section", "subsection", "source")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(table_frame, columns=columns,
+            displaycolumns=("type", "section", "subsection", "title", "authors", "year", "source"),
+            show="headings", selectmode="browse")
         headings = {"type": "Type", "title": "Title", "authors": "Authors", "year": "Year", "section": "Section", "subsection": "Subsection", "source": "Journal / Publisher / University"}
         widths = {"type": 65, "title": 260, "authors": 190, "year": 60, "section": 130, "subsection": 130, "source": 170}
         for column in columns:
@@ -387,20 +512,34 @@ class NMRCatalog(CatalogWindow):
         footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.count_label = ttk.Label(footer, text="0 items")
         self.count_label.pack(anchor="w")
-        ttk.Button(footer, text="Open / View", command=self.open_selected_file).pack(side="right")
-        ttk.Button(footer, text="Open Supplementary", command=self.open_supplementary).pack(side="right", padx=5)
-        ttk.Button(footer, text="View BibTeX", command=self.open_bibtex_file).pack(side="right", padx=5)
-        ttk.Button(footer, text="Open Notes", command=self.open_notes_file).pack(side="right")
-        ttk.Button(footer, text="Open Notes PDF", command=lambda: self.open_selected_attachment("notes_pdf_path", "Notes PDF")).pack(side="left")
-        footer_more = ttk.Frame(table_frame)
-        footer_more.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 0))
-        ttk.Button(footer_more, text="Open Images", command=self.open_images).pack(side="left")
-        ttk.Button(footer_more, text="Open LaTeX PDF", command=self.open_selected_equation_pdf).pack(side="left", padx=5)
-        ttk.Button(footer_more, text="Open Entry Folder", command=self.open_entry_folder).pack(side="right", padx=5)
-        ttk.Button(footer_more, text="Edit Selected", command=lambda: self.tabs.select(1)).pack(side="right")
-        ttk.Button(footer_more, text="Import BibTeX", command=self.import_bibtex).pack(side="right", padx=5)
-        ttk.Button(footer_more, text="Organize Files", command=self.organize_existing_files).pack(side="left", padx=5)
+        actions = ttk.Frame(footer)
+        actions.pack(fill="x", pady=(5, 0))
+        for column, (label, command) in enumerate((
+            ("Open / View", self.open_selected_file),
+            ("Open Supplementary", self.open_supplementary),
+            ("Open Notes", self.open_notes_file),
+            ("Open Notes PDF", lambda: self.open_selected_attachment("notes_pdf_path", "Notes PDF")),
+            ("View BibTeX", self.open_bibtex_file),
+            ("Open LaTeX PDF", self.open_selected_equation_pdf),
+            ("Open Images", self.open_images),
+            ("Edit Selected", lambda: self.tabs.select(1)),
+            ("Open Entry Folder", self.open_entry_folder),
+        )):
+            ttk.Button(actions, text=label, command=command, style="Toolbar.TButton").grid(
+                row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0))
+            actions.columnconfigure(column, weight=1)
 
+
+    def _build_readme_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=12)
+        notebook.add(tab, text="ReadMe")
+        text = tk.Text(tab, wrap="word", font=("Courier", 10), padx=12, pady=12)
+        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", SETUP_README)
+        text.configure(state="disabled")
 
     def _build_equation_editor(self):
         outer = self.equation_panel
@@ -695,8 +834,8 @@ Describe the background and objectives of this report.
         self.equation_canvas.delete("all")
         self._equation_photo = None
         self.equation_canvas.configure(scrollregion=(0, 0, 1, 1))
-        if self.fields["item_type"].get() == "Researchers":
-            self.equation_status.configure(text="Enter biography, research interests, or other plain-text notes.")
+        if self.fields["item_type"].get() in ("Researchers", "Websites"):
+            self.equation_status.configure(text="Enter website links, descriptions, or other plain text." if self.fields["item_type"].get() == "Websites" else "Enter biography, research interests, or other plain-text notes.")
             return
         if not latex:
             self.equation_status.configure(text="Type an equation to see its preview.", foreground="#555555")
@@ -760,6 +899,8 @@ Describe the background and objectives of this report.
                             literature if kind in ("Paper", "Book", "Manual", "Thesis") else set())
         if kind == "Researchers":
             visible = {"item_type", "title", "website", "section", "subsection"}
+        elif kind == "Websites":
+            visible = common
         for key, widget in self.field_widgets.items():
             if key in visible:
                 self.field_labels[key].grid()
@@ -775,15 +916,15 @@ Describe the background and objectives of this report.
             self.document_tabs.select(1)
         self.field_labels["title"].configure(text="Name *" if kind == "Researchers" else "Name of conference *" if kind == "Conference" else "Title *")
         self.notes.configure(state="normal")
-        if kind == "Researchers":
+        if kind in ("Researchers", "Websites"):
             self.document_tabs.select(self.plain_source_tab)
             self.workspace_tabs.select(0)
             self.document_tabs.hide(self.latex_source_tab)
             self.workspace_tabs.hide(self.pdf_area)
             self.workspace_tabs.tab(0, text="Plain text")
             self.note_actions.pack_forget()
-            self.equation_panel.configure(text="Researcher — plain text")
-            self.equation_status.configure(text="Enter biography, research interests, or other plain-text notes.")
+            self.equation_panel.configure(text="Websites — plain text" if kind == "Websites" else "Researcher — plain text")
+            self.equation_status.configure(text="Enter website links, descriptions, or other plain text." if kind == "Websites" else "Enter biography, research interests, or other plain-text notes.")
         else:
             self.document_tabs.add(self.latex_source_tab, text="LaTeX code")
             self.workspace_tabs.add(self.pdf_area, text="LaTeX output")
@@ -1047,9 +1188,12 @@ Describe the background and objectives of this report.
         values["equation_latex"] = self.equation_text.get("1.0", "end-1c").strip()
         values["equation_renderer"] = self.renderer_var.get()
         values["notes"] = self.notes.get("1.0", "end").strip()
-        if kind == "Researchers":
+        if kind in ("Researchers", "Websites"):
+            keep = {"item_type", "title", "notes", "section", "subsection"}
+            if kind == "Researchers":
+                keep.add("website")
             for key in values:
-                if key not in ("item_type", "title", "website", "notes", "section", "subsection"):
+                if key not in keep:
                     values[key] = ""
         return values
 
@@ -1161,16 +1305,19 @@ Describe the background and objectives of this report.
             item_filter = "Lecture"
         sql = "SELECT * FROM literature WHERE 1=1"
         parameters = []
-        if query:
-            pattern = f"%{query}%"
+        words = list(dict.fromkeys(normalize_search_text(query).split()))
+        if words:
             field_map = {
                 "Title": ("title",), "Keywords": ("keywords",), "Author": ("authors", "corresponding_author"),
                 "Section": ("section",), "Subsection": ("subsection",),
                 "All fields": ("title", "authors", "corresponding_author", "author_email", "source", "doi_isbn", "keywords", "section", "subsection", "notes", "equation_latex", "website", "place", "report_date"),
             }
             searchable = field_map[self.search_by_var.get()]
-            sql += " AND (" + " OR ".join(f"{field} LIKE ?" for field in searchable) + ")"
-            parameters.extend([pattern] * len(searchable))
+            # Every query word must occur in a searchable field, in any order.
+            # instr keeps symbols such as % and _ from acting as SQL wildcards.
+            for word in words:
+                sql += " AND (" + " OR ".join(f"instr(pycat_search({field}), ?) > 0" for field in searchable) + ")"
+                parameters.extend([word] * len(searchable))
         if item_filter != "All":
             sql += " AND item_type=?"
             parameters.append(item_filter)
@@ -1412,8 +1559,133 @@ Describe the background and objectives of this report.
         return value
 
     def ensure_category_folders(self):
-        for name in CATEGORY_FOLDERS.values():
-            os.makedirs(os.path.join(self.library_root(), name), exist_ok=True)
+        # Entry folders are created when needed; do not recreate empty categories.
+        os.makedirs(self.library_root(), exist_ok=True)
+
+    def unused_library_folders(self):
+        """Return maximal unused subtrees, preserving saved entries and draft uploads."""
+        root = os.path.abspath(self.library_root())
+        if os.path.islink(root) or (hasattr(os.path, "isjunction") and os.path.isjunction(root)):
+            raise OSError("Cleanup is unavailable when NMR_Library is a symbolic link.")
+        if not os.path.isdir(root):
+            return []
+        root_key = os.path.normcase(root)
+
+        def path_key(path):
+            return os.path.normcase(os.path.abspath(path))
+
+        def inside(path, parent):
+            try:
+                return os.path.commonpath((path, parent)) == parent
+            except ValueError:
+                return False
+
+        keep = set()
+        rows = [dict(row) for row in self.conn.execute("SELECT * FROM literature")]
+        # Files are copied immediately on upload, before Add/Update is pressed.
+        draft = {key: var.get() for key, var in self.fields.items()}
+        if draft.get("title", "").strip():
+            rows.append(draft)
+        columns = ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths",
+                   "image_paths", "notes_path", "equation_pdf_path", "notes_pdf_path")
+        for row in rows:
+            canonical = self.entry_folder_for(row.get("section"), row.get("subsection"),
+                self.folder_author(row.get("corresponding_author"), row.get("authors")),
+                row.get("title"), row.get("item_type"))
+            keep.add(path_key(canonical))
+            for key in columns:
+                paths = (row.get(key) or "").split("; ") if key in (
+                    "lecture_pdf_paths", "supplementary_paths", "image_paths") else [row.get(key) or ""]
+                for stored in paths:
+                    if not stored or stored.startswith(("http://", "https://")):
+                        continue
+                    resolved = self.resolve_stored_path(stored)
+                    for reference in (resolved, os.path.realpath(resolved)):
+                        parent = path_key(os.path.dirname(reference))
+                        if inside(parent, root_key):
+                            keep.add(parent)
+        candidates = []
+
+        def scan(folder):
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    # Never follow symbolic links or Windows directory junctions.
+                    if entry.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(entry.path)):
+                        continue
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    key = path_key(entry.path)
+                    if any(inside(key, saved) for saved in keep):
+                        continue
+                    if any(inside(saved, key) for saved in keep):
+                        scan(entry.path)
+                    else:
+                        candidates.append(entry.path)
+
+        scan(root)
+        return sorted(candidates, key=str.casefold)
+
+    def preview_unused_folders(self):
+        try:
+            candidates = self.unused_library_folders()
+        except (OSError, sqlite3.Error) as error:
+            messagebox.showerror(APP_TITLE, f"Could not check library folders:\n{error}")
+            return
+        if not candidates:
+            messagebox.showinfo(APP_TITLE, "No unused library folders were found.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Delete unused folders — review")
+        dialog.geometry("820x480")
+        dialog.transient(self)
+        panel = ttk.Frame(dialog, padding=12)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text=(f"Found {len(candidates)} unused folder(s) in NMR_Library.\n"
+            "The complete catalog and current upload form were checked.\n"
+            "Saved entry folders and referenced attachment folders will be kept.\n"
+            "The listed folders and ALL their contents will be permanently deleted."),
+            wraplength=760).pack(fill="x", pady=(0, 10))
+        listing = ttk.Frame(panel)
+        listing.pack(fill="both", expand=True)
+        text = tk.Text(listing, wrap="word", width=70, height=15)
+        scroll = ttk.Scrollbar(listing, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", "\n".join(os.path.relpath(path, self.library_root()) for path in candidates))
+        text.configure(state="disabled")
+        actions = ttk.Frame(panel)
+        actions.pack(fill="x", pady=(10, 0))
+
+        def delete_listed():
+            # Recheck protection immediately before removing only reviewed folders.
+            try:
+                current = set(self.unused_library_folders())
+            except (OSError, sqlite3.Error) as error:
+                messagebox.showerror(APP_TITLE, f"Could not recheck folders:\n{error}", parent=dialog)
+                return
+            deleted, failed, skipped = 0, [], 0
+            for folder in candidates:
+                if folder not in current or os.path.islink(folder):
+                    skipped += 1
+                    continue
+                try:
+                    shutil.rmtree(folder)
+                    deleted += 1
+                except OSError as error:
+                    failed.append(f"{os.path.relpath(folder, self.library_root())}: {error}")
+            dialog.destroy()
+            report = f"Deleted {deleted} unused folder(s). Catalog entries were kept."
+            if skipped:
+                report += f"\nSkipped {skipped} folder(s) that changed after review."
+            if failed:
+                messagebox.showwarning(APP_TITLE, report + "\nCould not delete:\n" + "\n".join(failed))
+            else:
+                messagebox.showinfo(APP_TITLE, report)
+
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="right")
+        ttk.Button(actions, text="Delete listed folders permanently", command=delete_listed).pack(side="right", padx=6)
+        dialog.grab_set()
 
     @staticmethod
     def folder_author(corresponding_author, authors):
@@ -1738,6 +2010,39 @@ Describe the background and objectives of this report.
         if paths:
             self.attach_image_files(paths)
 
+    def copy_image_from_clipboard(self):
+        """Attach a copied image as a PNG through the existing image storage path."""
+        if not self.fields["title"].get().strip():
+            messagebox.showinfo(APP_TITLE, "Enter the entry title before copying an image.")
+            return 0
+        try:
+            from PIL import Image, ImageGrab
+        except ImportError:
+            messagebox.showerror(APP_TITLE, "Install clipboard image support in your PyCat environment:\npython -m pip install --upgrade pillow")
+            return 0
+        try:
+            content = ImageGrab.grabclipboard()
+            if isinstance(content, list):
+                # Windows Explorer may place copied image filenames on the clipboard.
+                return self.attach_image_files(content)
+            if not isinstance(content, Image.Image):
+                messagebox.showinfo(APP_TITLE, "The clipboard contains no image. Copy an image or screenshot, then try again.")
+                return 0
+            with tempfile.TemporaryDirectory(prefix="pycat_clipboard_") as directory:
+                path = os.path.join(directory, "clipboard-image.png")
+                if content.mode not in ("RGB", "RGBA", "L", "LA", "P", "1", "I", "I;16"):
+                    content = content.convert("RGBA")
+                content.save(path, format="PNG")
+                count = self.attach_image_files([path])
+            if count:
+                messagebox.showinfo(APP_TITLE, "Clipboard image attached as PNG. Click Add or Update to save the entry.")
+            return count
+        except (NotImplementedError, AttributeError):
+            messagebox.showerror(APP_TITLE, "Clipboard image access is unavailable.\nUpdate Pillow: python -m pip install --upgrade pillow\nOn Ubuntu/Debian install: sudo apt install xclip wl-clipboard\nThen copy the image again and retry.")
+        except Exception as error:
+            messagebox.showerror(APP_TITLE, f"Could not copy an image from the clipboard:\n{error}")
+        return 0
+
     def attach_image_files(self, paths):
         """Validate and attach one or more images without discarding existing ones."""
         if not self.fields["title"].get().strip():
@@ -1783,6 +2088,12 @@ Describe the background and objectives of this report.
         return "break"
 
     def open_selected_file(self):
+        if self.fields["item_type"].get() == "Websites":
+            self.tabs.select(1)
+            self.document_tabs.select(self.plain_source_tab)
+            self.workspace_tabs.select(0)
+            self.notes.focus_set()
+            return
         if self.fields["item_type"].get() == "Lecture":
             paths = [self.resolve_stored_path(p) for p in self.fields["lecture_pdf_paths"].get().split("; ") if p]
             paths = [p for p in paths if os.path.isfile(p)]

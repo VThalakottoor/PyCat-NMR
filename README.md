@@ -1,4 +1,4 @@
-# PyCat NMR v1.0.11
+# PyCat NMR v1.0.17
 
 PyCat NMR is a desktop catalog for organizing NMR papers, books, manuals,
 theses, lectures, notes, images, equations, BibTeX records, and supplementary material. It uses
@@ -6,6 +6,80 @@ Python, Tkinter, and SQLite and runs from source on Linux, Windows, and macOS.
 
 **Author:** Vineeth Francis Thalakottoor  
 **Contact:** vineeth.thalakottoor@cea.fr
+
+## New in v1.0.17 — flexible word search
+
+Search ignores letter case and treats punctuation and symbols (including `-`, `/`, `*`, `_`, and dots) as word separators. For example, **Non-Linearities in DNP-Hyperpolarized Solids** matches **non linearities in dnp hyperpolarized solids**.
+
+Every typed word must be present, in any order, within the selected search field(s). Partial words still match, so `cryogenic tem` can find `Cryogenic Temperature`. For **All fields**, the words can occur in different fields of the same entry. Repeated words are checked once. Searching only punctuation is treated as an empty search. Type, Section, and Subsection dropdown filters continue to apply. Stored titles and metadata are unchanged.
+
+## New in v1.0.16
+
+Moved **Organize Files** and **Delete unused folders…** to the top of the window, immediately after the Subsection filter.
+
+The bottom actions now appear in one row, from left to right: **Open / View**, **Open Supplementary**, **Open Notes**, **Open Notes PDF**, **View BibTeX**, **Open LaTeX PDF**, **Open Images**, **Edit Selected**, **Open Entry Folder**.
+
+Removed the **Import BibTeX** button. The **BibTeX…**, **Paste…**, drag-and-drop, and Fill Form tools for individual entries remain available in Upload / Edit.
+
+## New in v1.0.15
+
+Search Library columns now appear in this order: **Type → Section → Subsection → Title → Authors → Year → Journal / Publisher / University**. Heading sorting and saved catalog data remain compatible.
+
+## New in v1.0.14 — delete unused folders
+
+Under **Search Library**, click **Delete unused folders…** to review folders inside `NMR_Library` that are no longer used by catalog entries. Click **Delete listed folders permanently** to delete the listed folders and all their contents, or **Cancel** to keep them.
+
+The check uses **every saved database entry**, including entries hidden by search or category filters. It protects each entry's current folder and everything inside it, still-referenced attachment folders, and files uploaded in the current unsaved form. It can remove old folders left after renaming, unused Unclassified folders, and empty categories or section/subsection branches. An Unclassified folder that contains an active entry is retained.
+
+After renaming an entry, click **Update** first. If an old folder is still referenced by an entry's attachments, run **Organize Files** to copy the attachments into the current entry folder, then run cleanup again. Cleanup does not alter the catalog or delete loose files directly inside `NMR_Library`. It skips symbolic links and supported Windows junctions. Only reviewed folders that remain unused when deletion starts are removed. Deletion errors are reported.
+
+Empty category folders are now created as needed rather than recreated at every startup. The existing database and all previous features remain compatible.
+
+## New in v1.0.13
+
+- Added a **ReadMe** tab beside **Search Library** and **Upload / Edit**. It contains environment creation, package installation, activation, running, and deactivation commands for **Windows CMD** and **Linux Terminal**.
+- Added **Copy from clipboard** beside the **Images…** upload button for entry types that support image attachments. Copy an image or screenshot, enter the entry title, click the button, then click **Add** or **Update**. The image is saved as a PNG in the entry's `Images/` folder; existing attachments remain available. Repeated copies receive distinct filenames.
+- Clipboard images require Pillow. On Ubuntu/Debian, install `xclip` (X11) or `wl-clipboard` (Wayland). Empty or unsupported clipboard contents produce an explanatory message. Windows also accepts copied image files.
+
+### Windows CMD environment
+
+```bat
+py -m venv "%USERPROFILE%\venvs\pycat"
+call "%USERPROFILE%\venvs\pycat\Scripts\activate.bat"
+python -m pip install --upgrade pip
+python -m pip install --upgrade matplotlib pillow tkinterdnd2
+cd /d "C:\path\to\PyCat"
+python PyCat_NMR.py
+```
+
+For later sessions, run the activation command, change to your PyCat folder, and run the script. Replace the example folder with your actual location. Use `deactivate` to leave the environment.
+
+### Linux Terminal environment (Ubuntu/Debian)
+
+```bash
+sudo apt update
+sudo apt install python3 python3-venv python3-tk xclip wl-clipboard
+python3 -m venv ~/venvs/pycat
+source ~/venvs/pycat/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --upgrade matplotlib pillow tkinterdnd2
+cd "/path/to/PyCat"
+python PyCat_NMR.py
+```
+
+For later sessions, run `source ~/venvs/pycat/bin/activate`, change to your PyCat folder, and run the script. Replace the example folder with your actual location. Use `deactivate` to leave the environment. Other Linux distributions use their own package manager for system prerequisites.
+
+## New in v1.0.12
+
+Added **Websites** as a visible entry type in **Upload / Edit** and in the search type filter.
+
+- Required fields: **Title**, **Section**, and **Subsection**.
+- **Plain text** stores website links, descriptions, and any other text. It is optional.
+- Authors, year, attachments, LaTeX code, and PDF controls are hidden for this type.
+- Click **Add** or **Update** to save. Select the entry and click **Open / View** to edit its plain text.
+- Entries use `NMR_Library/Websites/Section/Subsection/Unknown author-Title/`; the text is saved in `Notes.txt` and in the existing catalog database and automatic CSV.
+
+Existing catalogs remain compatible; no new database columns or dependencies are needed.
 
 ## New in v1.0.11
 
@@ -79,7 +153,7 @@ Images and their paths updated. Original files are preserved.
 ## New in v1.0.6
 
 The type choices are now **Paper**, **Book**, **Manual**, **Thesis**,
-**Lecture notes**, **Conference**, **Report**, and **Researchers**.
+**Lecture notes**, **Conference**, **Report**, **Researchers**, and **Websites**.
 Note, Image, and Equation have been removed from the new-entry type choices.
 Existing records and attachment folders are preserved and remain visible
 under All in Search Library. Images and LaTeX remain available within the
@@ -517,9 +591,6 @@ There are two attachment methods:
 After selecting or dropping a `.bib` or `.bibtex` file, PyCat asks whether its metadata
 should fill the form. After any attachment method, click **Add** or **Update**
 to save the catalog entry.
-**Import BibTeX** can create multiple catalog entries from a BibTeX database;
-it asks for one compulsory Section and Subsection for the imported group.
-Entries without a title or author, and duplicate entries, are skipped.
 
 ## Notes
 
