@@ -52,7 +52,7 @@ ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Rep
 PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Note", "Image", "Equation")
 
 
-APP_VERSION = "1.0.17"
+APP_VERSION = "1.0.18"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -377,7 +377,7 @@ class NMRCatalog(CatalogWindow):
             ("file_link", "PDF attachment", None),
             ("lecture_pdf_paths", "Lecture PDFs", None),
             ("supplementary_paths", "Supplementary files", None),
-            ("bibtex_path", "BibTeX attachment", None),
+            ("bibtex_path", "BibTeX / RIS attachment", None),
             ("image_paths", "Images", None),
             ("website", "Website", None),
             ("place", "Conference place", None),
@@ -420,7 +420,7 @@ class NMRCatalog(CatalogWindow):
             (13, "file_link", "Select PDF…", self.browse_file),
             (14, "lecture_pdf_paths", "Select PDFs…", self.browse_lecture_pdfs),
             (15, "supplementary_paths", "Supplement…", self.browse_supplementary),
-            (16, "bibtex_path", "BibTeX…", self.browse_bibtex_attachment),
+            (16, "bibtex_path", "BibTeX / RIS…", self.browse_bibtex_attachment),
             (17, "image_paths", "Images…", self.browse_images),
         ):
             actions = ttk.Frame(form)
@@ -458,7 +458,7 @@ class NMRCatalog(CatalogWindow):
                 paste_button = ttk.Button(actions, text="Paste…", command=self.paste_bibtex_attachment)
                 paste_button.pack(side="left", padx=(4, 0))
                 self.attachment_buttons["bibtex_paste"] = paste_button
-                drop_text = "Drop .bib/.bibtex here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
+                drop_text = "Drop .bib/.bibtex/.ris here" if DND_AVAILABLE else "Drag-and-drop: install tkinterdnd2"
                 self.bibtex_drop_target = ttk.Label(actions, text=drop_text, relief="groove", padding=(8, 6))
                 self.bibtex_drop_target.pack(side="left", padx=(5, 0))
                 if DND_AVAILABLE:
@@ -519,7 +519,7 @@ class NMRCatalog(CatalogWindow):
             ("Open Supplementary", self.open_supplementary),
             ("Open Notes", self.open_notes_file),
             ("Open Notes PDF", lambda: self.open_selected_attachment("notes_pdf_path", "Notes PDF")),
-            ("View BibTeX", self.open_bibtex_file),
+            ("View BibTeX / RIS", self.open_bibtex_file),
             ("Open LaTeX PDF", self.open_selected_equation_pdf),
             ("Open Images", self.open_images),
             ("Edit Selected", lambda: self.tabs.select(1)),
@@ -595,7 +595,8 @@ class NMRCatalog(CatalogWindow):
         extra = ttk.Frame(panel)
         extra.pack(fill="x")
         ttk.Button(extra, text="Clear code", command=self.clear_latex_code).pack(side="left")
-        ttk.Button(extra, text="Insert default code", command=self.insert_default_latex_code).pack(side="left", padx=4)
+        ttk.Button(extra, text="Insert default report", command=self.insert_default_latex_code).pack(side="left", padx=4)
+        ttk.Button(extra, text="Insert default beamer", command=self.insert_default_beamer).pack(side="left", padx=4)
         ttk.Button(extra, text="New page", command=self.insert_document_page).pack(side="left")
         navigation = ttk.Frame(self.pdf_area)
         navigation.pack(fill="x")
@@ -669,15 +670,39 @@ Describe the background and objectives of this report.
         self.equation_text.focus_set()
         self.preview_equation()
 
-    def insert_default_latex_code(self):
+    def insert_default_latex_code(self, source=None):
         self.equation_text.edit_separator()
-        self.equation_text.insert("insert", self.report_template())
+        self.equation_text.insert("insert", self.report_template() if source is None else source)
         self.equation_text.edit_separator()
         self.renderer_var.set("Full LaTeX")
         self.document_tabs.select(self.latex_source_tab)
         self.workspace_tabs.select(0)
         self.equation_text.focus_set()
         self.preview_equation()
+
+    @staticmethod
+    def beamer_template():
+        return r"""\documentclass[aspectratio=169]{beamer}
+\title{Presentation title}
+\author{Author name}
+\date{\today}
+
+\begin{document}
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Introduction}
+\begin{itemize}
+\item First point.
+\item Second point.
+\end{itemize}
+\end{frame}
+\end{document}
+"""
+
+    def insert_default_beamer(self):
+        self.insert_default_latex_code(self.beamer_template())
 
     def notes_active(self):
         return self.document_tabs.index(self.document_tabs.select()) == 0
@@ -962,9 +987,8 @@ Describe the background and objectives of this report.
         if not source:
             raise ValueError("Enter an equation first.")
         if r"\documentclass" in source:
-            document = re.sub(r"\\documentclass(?:\[([^\]]*)\])?", 
-                lambda match: r"\documentclass[" + ((match.group(1) + ",") if match.group(1) else "") + "a4paper]",
-                source, count=1)
+            # Respect the declared page size and Beamer slide aspect ratio.
+            document = source
         else:
             # Display environments provide their own math mode; matrix/cases need a wrapper.
             display = re.match(r"\\begin\{(?:align\*?|alignat\*?|gather\*?|multline\*?|equation\*?|flalign\*?|displaymath)\}", source)
@@ -1020,7 +1044,7 @@ Describe the background and objectives of this report.
             self.equation_canvas.create_image(8, 8, anchor="nw", image=self._equation_photo)
             self.equation_canvas.configure(scrollregion=self.equation_canvas.bbox("all"))
             self.workspace_tabs.select(self.pdf_area)
-            self.equation_status.configure(text="A4 preview (up to 100 pages). Use Add or Update to save.", foreground="#27632a")
+            self.equation_status.configure(text="PDF preview (up to 100 pages). Use Add or Update to save.", foreground="#27632a")
         except ImportError:
             self.equation_status.configure(text="Install image support: python -m pip install pillow", foreground="#a04020")
         except subprocess.TimeoutExpired:
@@ -1827,13 +1851,13 @@ Describe the background and objectives of this report.
 
     def paste_bibtex_attachment(self):
         dialog = tk.Toplevel(self)
-        dialog.title("Paste BibTeX")
+        dialog.title("Paste BibTeX / RIS")
         dialog.geometry("760x520")
         dialog.minsize(520, 360)
         dialog.transient(self)
         panel = ttk.Frame(dialog, padding=12)
         panel.pack(fill="both", expand=True)
-        ttk.Label(panel, text="Paste BibTeX below. Fill Form extracts its metadata; Save .bib attaches the citation file.",
+        ttk.Label(panel, text="Paste BibTeX or RIS below. Fill Form extracts metadata; Save citation attaches the original text.",
                   wraplength=650).pack(anchor="w", pady=(0, 8))
 
         def paste():
@@ -1845,19 +1869,19 @@ Describe the background and objectives of this report.
         def save():
             raw = editor.get("1.0", "end-1c")
             if not raw.strip():
-                messagebox.showwarning(APP_TITLE, "Paste some BibTeX first.", parent=dialog)
+                messagebox.showwarning(APP_TITLE, "Paste some BibTeX or RIS first.", parent=dialog)
                 return
             if not self.fields["title"].get().strip():
-                messagebox.showwarning(APP_TITLE, "Enter the entry title first, then paste its BibTeX.", parent=dialog)
+                messagebox.showwarning(APP_TITLE, "Enter the entry title first, then paste its citation.", parent=dialog)
                 return
             try:
                 path = self.store_pasted_bibtex(raw)
                 self.fields["bibtex_path"].set(path)
             except OSError as error:
-                messagebox.showerror(APP_TITLE, f"Could not save the BibTeX:\n{error}", parent=dialog)
+                messagebox.showerror(APP_TITLE, f"Could not save the citation:\n{error}", parent=dialog)
                 return
             dialog.destroy()
-            messagebox.showinfo(APP_TITLE, "BibTeX file attached. Click Add or Update to save the catalog entry.")
+            messagebox.showinfo(APP_TITLE, "Citation file attached. Click Add or Update to save the catalog entry.")
 
         # Keep actions above the expanding editor so they remain visible on
         # small screens and with large desktop font/scaling settings.
@@ -1867,7 +1891,7 @@ Describe the background and objectives of this report.
         ttk.Button(buttons, text="Fill Form", command=lambda: self.fill_form_from_bibtex_text(
             editor.get("1.0", "end-1c"), parent=dialog
         )).pack(side="left", padx=5)
-        ttk.Button(buttons, text="Save .bib", command=save).pack(side="right")
+        ttk.Button(buttons, text="Save citation", command=save).pack(side="right")
         ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=5)
 
         body = ttk.Frame(panel)
@@ -1888,7 +1912,7 @@ Describe the background and objectives of this report.
     def store_pasted_bibtex(self, text):
         # Preserve pasted braces, accents, commands and line breaks verbatim.
         with tempfile.TemporaryDirectory(prefix="pycat_bib_") as directory:
-            source = os.path.join(directory, "reference.bib")
+            source = os.path.join(directory, "reference.ris" if self.is_ris(text) else "reference.bib")
             with open(source, "w", encoding="utf-8", newline="") as file:
                 file.write(text)
             return self.store_document(source, "BibTeX")
@@ -1915,44 +1939,44 @@ Describe the background and objectives of this report.
         self.fields["authors"].set("; ".join(rearranged))
 
     def browse_bibtex_attachment(self):
-        path = filedialog.askopenfilename(title="Attach BibTeX", filetypes=(("BibTeX files", "*.bib *.bibtex"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(title="Attach BibTeX / RIS", filetypes=(("Citation files", "*.bib *.bibtex *.ris"), ("All files", "*.*")))
         if path:
             self.attach_bibtex_file(path)
 
     def attach_bibtex_file(self, path):
-        """Validate, attach and optionally parse one local BibTeX file."""
+        """Validate, attach and optionally parse one local BibTeX or RIS file."""
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isfile(path):
-            messagebox.showwarning(APP_TITLE, "The BibTeX item is not a file.")
+            messagebox.showwarning(APP_TITLE, "The citation item is not a file.")
             return False
-        if os.path.splitext(path)[1].lower() not in (".bib", ".bibtex"):
-            messagebox.showwarning(APP_TITLE, "Only .bib and .bibtex files can be attached as BibTeX.")
+        if os.path.splitext(path)[1].lower() not in (".bib", ".bibtex", ".ris"):
+            messagebox.showwarning(APP_TITLE, "Supported citation files: .bib, .bibtex and .ris.")
             return False
         try:
             self.fields["bibtex_path"].set(self.store_document(path, "BibTeX"))
             with open(path, encoding="utf-8-sig", errors="replace") as file:
                 bibtex_text = file.read()
             if messagebox.askyesno(
-                APP_TITLE, "BibTeX file attached. Fill the form from its metadata now?",
+                APP_TITLE, "Citation file attached. Fill the form from its metadata now?",
                 default=messagebox.YES,
             ):
                 self.fill_form_from_bibtex_text(bibtex_text)
             return True
         except OSError as error:
-            messagebox.showerror(APP_TITLE, f"Could not store the BibTeX file:\n{error}")
+            messagebox.showerror(APP_TITLE, f"Could not store the citation file:\n{error}")
             return False
 
     def drop_bibtex(self, event):
-        """Accept the first .bib or .bibtex file from a desktop file-manager drop."""
+        """Accept the first .bib, .bibtex or .ris file from a desktop file-manager drop."""
         try:
             paths = list(self.tk.splitlist(event.data))
         except (tk.TclError, TypeError):
             paths = []
         if not paths:
-            messagebox.showwarning(APP_TITLE, "No BibTeX file was found in the drop.")
+            messagebox.showwarning(APP_TITLE, "No citation file was found in the drop.")
             return "break"
         if len(paths) > 1:
-            messagebox.showinfo(APP_TITLE, "Only one BibTeX attachment is supported. Using the first dropped file.")
+            messagebox.showinfo(APP_TITLE, "Only one citation attachment is supported. Using the first dropped file.")
         self.attach_bibtex_file(paths[0])
         return "break"
 
@@ -2172,7 +2196,7 @@ Describe the background and objectives of this report.
             messagebox.showerror(APP_TITLE, f"Could not open the entry folder:\n{error}")
 
     def open_bibtex_file(self):
-        self.open_selected_attachment("bibtex_path", "BibTeX")
+        self.open_selected_attachment("bibtex_path", "BibTeX / RIS")
 
     def open_supplementary(self):
         selection = self.tree.selection()
@@ -2246,6 +2270,66 @@ Describe the background and objectives of this report.
             os.replace(temporary, AUTO_CSV_PATH)
         except OSError as error:
             messagebox.showwarning(APP_TITLE, f"The automatic CSV file could not be updated:\n{error}")
+
+    @staticmethod
+    def is_ris(text):
+        return bool(re.search(r"^\s*TY\s{2}-\s*\S+", text.lstrip("\ufeff"), re.MULTILINE))
+
+    @staticmethod
+    def parse_citation(text):
+        return NMRCatalog.parse_ris(text) if NMRCatalog.is_ris(text) else NMRCatalog.parse_bibtex(text)
+
+    @staticmethod
+    def parse_ris(text):
+        """Read RIS records into the same metadata fields used by BibTeX imports."""
+        entries, record = [], None
+        last_tag = None
+
+        def finish():
+            if not record:
+                return
+            def first(*tags):
+                return next((v for tag in tags for v in record.get(tag, []) if v), "")
+            kind = first("TY").upper()
+            entry_type = {"BOOK": "book", "EBOOK": "book", "CHAP": "inbook",
+                          "THES": "thesis", "RPRT": "techreport", "CONF": "proceedings",
+                          "CPAPER": "inproceedings", "MANUAL": "manual"}.get(kind, "article")
+            year = re.search(r"\b\d{4}\b", first("PY", "Y1", "DA"))
+            start, end = first("SP"), first("EP")
+            pages = start + ("--" + end if start and end and start != end else "")
+            pages = pages or end or first("C7")
+            fields = {
+                "title": first("TI", "T1", "CT"),
+                "author": " and ".join(record.get("AU") or record.get("A1") or []),
+                "year": year.group(0) if year else "",
+                "journal": first("JF", "JO", "JA", "J2", "T2") if entry_type == "article" else "",
+                "booktitle": first("T2", "BT") if entry_type in ("inbook", "inproceedings") else "",
+                "publisher": first("PB"), "volume": first("VL"), "number": first("IS"),
+                "pages": pages, "doi": first("DO"), "isbn": first("SN"),
+                "keywords": "; ".join(record.get("KW", [])),
+                "abstract": first("AB", "N2"), "note": "\n".join(record.get("N1", [])),
+                "url": first("UR"), "file": first("L1"),
+            }
+            entries.append((entry_type, {k: v for k, v in fields.items() if v}))
+
+        for line in text.lstrip("\ufeff").splitlines():
+            match = re.match(r"^\s*([A-Z0-9]{2})\s{2}-\s?(.*)$", line)
+            if match:
+                tag, value = match.groups()
+                if tag == "TY":
+                    finish()
+                    record = {}
+                elif tag == "ER":
+                    finish()
+                    record, last_tag = None, None
+                    continue
+                if record is not None:
+                    record.setdefault(tag, []).append(value.strip())
+                    last_tag = tag
+            elif record is not None and last_tag and line.strip():
+                record[last_tag][-1] += " " + line.strip()
+        finish()
+        return entries
 
     @staticmethod
     def parse_bibtex(text):
@@ -2389,21 +2473,21 @@ Describe the background and objectives of this report.
         return populated
 
     def fill_form_from_bibtex_text(self, text, parent=None):
-        entries = self.parse_bibtex(text)
+        entries = self.parse_citation(text)
         if not entries:
-            messagebox.showwarning(APP_TITLE, "No valid BibTeX entry was found.", parent=parent)
+            messagebox.showwarning(APP_TITLE, "No valid BibTeX or RIS entry was found.", parent=parent)
             return False
         if len(entries) == 1:
             self.apply_bibtex_to_form(*entries[0])
             messagebox.showinfo(
                 APP_TITLE,
-                "The form was filled from BibTeX. Review the fields, then click Add or Update.",
+                "The form was filled from the citation. Review the fields, then click Add or Update.",
                 parent=parent,
             )
             return True
 
         chooser = tk.Toplevel(parent or self)
-        chooser.title("Choose a BibTeX entry")
+        chooser.title("Choose a citation entry")
         chooser.geometry("760x380")
         chooser.minsize(480, 280)
         chooser.transient(parent or self)
@@ -2426,13 +2510,13 @@ Describe the background and objectives of this report.
         def apply_selected(_event=None):
             selection = choices.curselection()
             if not selection:
-                messagebox.showinfo(APP_TITLE, "Select a BibTeX entry first.", parent=chooser)
+                messagebox.showinfo(APP_TITLE, "Select a citation entry first.", parent=chooser)
                 return
             self.apply_bibtex_to_form(*entries[selection[0]])
             chooser.destroy()
             messagebox.showinfo(
                 APP_TITLE,
-                "The form was filled from the selected BibTeX entry. Review it, then click Add or Update.",
+                "The form was filled from the selected citation entry. Review it, then click Add or Update.",
                 parent=parent,
             )
 
@@ -2446,7 +2530,7 @@ Describe the background and objectives of this report.
         return True
 
     def import_bibtex(self):
-        path = filedialog.askopenfilename(title="Import BibTeX", filetypes=(("BibTeX files", "*.bib *.bibtex"), ("Text files", "*.txt"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(title="Import BibTeX / RIS", filetypes=(("Citation files", "*.bib *.bibtex *.ris"), ("Text files", "*.txt"), ("All files", "*.*")))
         if not path:
             return
         section = simpledialog.askstring(APP_TITLE, "Section / field for these entries (required):", parent=self)
@@ -2454,18 +2538,18 @@ Describe the background and objectives of this report.
             return
         section = section.strip()
         if not section:
-            messagebox.showwarning(APP_TITLE, "Section / field is required for BibTeX import.")
+            messagebox.showwarning(APP_TITLE, "Section / field is required for citation import.")
             return
         subsection = simpledialog.askstring(APP_TITLE, "Subsection for these entries (required):", parent=self)
         if subsection is None:
             return
         subsection = subsection.strip()
         if not subsection:
-            messagebox.showwarning(APP_TITLE, "Subsection is required for BibTeX import.")
+            messagebox.showwarning(APP_TITLE, "Subsection is required for citation import.")
             return
         try:
             with open(path, encoding="utf-8-sig") as file:
-                entries = self.parse_bibtex(file.read())
+                entries = self.parse_citation(file.read())
             imported = skipped = 0
             columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes")
             for entry_type, bib in entries:
@@ -2524,10 +2608,10 @@ Describe the background and objectives of this report.
             self.conn.commit()
             self.sync_csv()
             self.refresh_table()
-            messagebox.showinfo(APP_TITLE, f"Imported {imported} BibTeX entries.\nSkipped {skipped} incomplete or duplicate entries.")
+            messagebox.showinfo(APP_TITLE, f"Imported {imported} citation entries.\nSkipped {skipped} incomplete or duplicate entries.")
         except (OSError, sqlite3.Error) as error:
             self.conn.rollback()
-            messagebox.showerror(APP_TITLE, f"BibTeX import failed:\n{error}")
+            messagebox.showerror(APP_TITLE, f"Citation import failed:\n{error}")
 
     def store_bibtex_entry(self, source_bib, title, entry_type, fields):
         """Store a small BibTeX file beside the paper instead of only linking the bulk import."""
