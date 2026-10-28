@@ -1,29 +1,30 @@
-# PyCat NMR — README
+# PyCat NMR v1.0.19
 
-Version: **1.0.18**  
-Author: Vineeth Francis Thalakottoor  
-Contact: vineeth.thalakottoor@cea.fr
+**Python Catalog for NMR**  
+**Author:** Vineeth Francis Thalakottoor  
+**Contact:** vineeth.thalakottoor@cea.fr
 
-PyCat NMR is a desktop catalog for papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites. It stores metadata, attachments, plain-text notes, LaTeX source, and generated PDFs beside the application.
+PyCat is a local desktop catalog for papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites. It uses Python, Tkinter, and SQLite.
 
-## Requirements
+This update uses the uploaded **v1.0.18** program as its base. It adds a **Backup** tab and multiple website links. Existing catalog features, citation support (including RIS), file organization, search behavior, and table/button order are retained.
 
-- Python **3.9 or newer**, with Tkinter and a graphical desktop session.
-- `matplotlib` for quick equation previews.
-- `pillow` for image handling and full PDF previews.
-- `tkinterdnd2` for optional drag-and-drop attachments; file browsing works without it.
-- `pdflatex` for compiling reports and Beamer slides to PDF.
-- Poppler's `pdftoppm` for displaying PDF previews inside PyCat.
+## Files to keep together
 
-Citation parsing uses the Python standard library; no additional BibTeX or RIS package is needed. Internet access is needed to install dependencies; normal catalog use works offline.
+Keep `PyCat_NMR.py`, `nmr_catalog.db`, `PyCat_NMR_Catalog.csv`, and the complete `NMR_Library` folder together. The database and catalog files are created beside the Python program. To update, close PyCat and replace the program file in the existing PyCat folder.
 
-## Install on Ubuntu / Debian
+The updated program uses the existing database. Multiple links use the existing `website` field, so no new database columns are required. Keep your database and attachments when replacing the program.
 
-Install the system prerequisites:
+## Setup and running
+
+No additional Python packages are required specifically for Backup or multiple website links. The existing optional packages support previews, image handling, clipboard images, and drag-and-drop.
+
+### Ubuntu / Linux Terminal
+
+Install Python/Tkinter and rsync:
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-venv python3-tk
+sudo apt install python3 python3-venv python3-tk rsync
 ```
 
 Create and activate an environment:
@@ -32,182 +33,165 @@ Create and activate an environment:
 python3 -m venv ~/venvs/pycat
 source ~/venvs/pycat/bin/activate
 python -m pip install --upgrade pip
-python -m pip install matplotlib pillow tkinterdnd2
+python -m pip install --upgrade matplotlib pillow tkinterdnd2
 ```
 
-For reports, slides, and full PDF previews:
-
-```bash
-sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
-```
-
-Run the program from your PyCat folder:
+Change to your actual PyCat folder and run:
 
 ```bash
 cd "/path/to/PyCat"
 python PyCat_NMR.py
 ```
 
-Activate the environment each time you open a new terminal. Run `deactivate` when finished.
+For later sessions, activate the environment, change to the PyCat folder, and run the program. Use `deactivate` to leave the environment.
 
-## Install on Windows — Command Prompt
+For Linux clipboard-image access, install the helper appropriate to your session:
 
-Install Python 3.9 or newer with Tcl/Tk support. Open CMD, then run:
+```bash
+sudo apt install xclip wl-clipboard
+```
+
+For full LaTeX and PDF previews:
+
+```bash
+sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
+```
+
+Other Linux distributions use their own package manager for these system tools.
+
+### Windows Command Prompt (CMD)
+
+Install Python with Tcl/Tk support, then create and activate the environment:
 
 ```bat
 py -m venv "%USERPROFILE%\venvs\pycat"
 call "%USERPROFILE%\venvs\pycat\Scripts\activate.bat"
 python -m pip install --upgrade pip
-python -m pip install matplotlib pillow tkinterdnd2
+python -m pip install --upgrade matplotlib pillow tkinterdnd2
 ```
 
-Run the application:
+Change to your actual PyCat folder and run:
 
 ```bat
 cd /d "C:\path\to\PyCat"
 python PyCat_NMR.py
 ```
 
-For full LaTeX support, install MiKTeX or TeX Live, including Beamer, and Poppler. Add their executable folders to PATH, then restart your terminal. Check:
+Use the activation command again in each new CMD window. Use `deactivate` when finished.
 
-```bat
-where pdflatex
-where pdftoppm
+The Backup tab uses Windows' built-in **Robocopy**. For full LaTeX previews, install a LaTeX distribution and Poppler, make `pdflatex` and `pdftoppm` available on PATH, and restart PyCat.
+
+## Tabs
+
+- **Search Library:** search, filter, open, and select saved entries. Existing table order and action buttons remain in place.
+- **Upload / Edit:** create or update catalog entries, attachments, notes, and LaTeX content.
+- **ReadMe:** view setup and usage instructions inside the program.
+- **Backup:** choose folders, see their sizes, and run a backup or mirror.
+
+## Backup tab
+
+### Inputs and controls
+
+| Control | Meaning |
+|---|---|
+| Operating system | Choose **Linux** or **Windows**, matching the computer running PyCat. |
+| Mode | Choose ordinary Backup or Mirror. |
+| Initial folder (source) | The folder containing the current files to copy. |
+| Final folder (destination) | The folder where the backup should be stored. |
+| Browse… | Select a folder instead of typing its path. |
+| Verbose output | Show individual file details in the output panel. When off, show summary output and errors. |
+| Start backup | Start copying in the background. |
+| Cancel | Stop a running transfer. The destination may be incomplete. |
+| Refresh folder sizes | Recalculate both folder sizes. |
+
+Paths may contain spaces. Folder sizes refresh after you edit the paths, and again after a backup completes or stops. A destination that does not exist shows zero bytes and is created when the transfer starts.
+
+Sizes are displayed in **bytes and MiB**, with file counts. They measure the content sizes of regular files, including hidden files, rather than allocated disk space. Symbolic links and directory junctions are excluded from size totals. Unreadable items are reported as a partial size. Size calculations run in the background.
+
+### Backup and mirror modes
+
+| Source change | Backup | Mirror |
+|---|---|---|
+| New file/folder | Copied | Copied |
+| Changed file | Updated when detected as changed | Updated |
+| Deleted source file/folder | Previous destination copy is retained | Destination copy is deleted |
+| Renamed source file/folder | New name is copied; old destination name remains | New name is copied; old destination name is removed |
+| Destination-only files | Retained | Deleted |
+
+**Mirror permanently deletes destination-only files and folders.** The program displays both paths and asks for confirmation before starting a mirror.
+
+Both modes copy in one direction, from initial to final. Changes made in the destination are not copied back to the source. Overwritten files do not have a version history.
+
+### Example: USB to computer
+
+On Linux:
+
+```text
+Initial folder: /media/vineeth/UBUNTU 24_0/PyCat
+Final folder: /home/vineeth/Documents/LSDRM/Bibliography/PyCat
 ```
 
-Activate the environment in each new CMD window before running PyCat. Use `deactivate` to leave it.
+On Windows:
 
-## Keep your catalog together
-
-Keep these items in the same application folder:
-
-| Item | Purpose |
-| --- | --- |
-| `PyCat_NMR.py` | Application |
-| `nmr_catalog.db` | SQLite catalog database, created automatically |
-| `PyCat_NMR_Catalog.csv` | Automatically refreshed catalog export |
-| `NMR_Library/` | Stored attachments and entry folders |
-
-Entry folders are organized by category, section, subsection, and author/title. Attachment paths are stored relative to the application folder where possible, so the complete folder can be moved between computers.
-
-To upgrade, close PyCat and replace the application script in your existing PyCat folder. Retain the database, CSV, and `NMR_Library` folder. Back up the whole folder before upgrading.
-
-## Add and edit entries
-
-1. Open **Upload / Edit** and choose the entry type.
-2. Enter the title, section, and subsection. Existing section/subsection values appear as suggestions.
-3. Enter authors for papers, books, manuals, theses, lecture notes, and reports.
-4. Attach PDFs, citations, supplementary files, or images using the available controls.
-5. Add plain text or LaTeX source if needed.
-6. Click **Add** for a new entry or **Update** for an existing selected entry.
-
-Conferences and reports require a title but allow an empty section/subsection. An optional report date must use `YYYY-MM-DD`. Researchers and websites use plain-text notes. Lecture notes support multiple PDF attachments.
-
-## BibTeX and RIS citations
-
-Supported citation files: **`.bib`, `.bibtex`, and `.ris`**.
-
-### Attach a citation and fill the form
-
-1. Select Paper, Book, Manual, or Thesis in **Upload / Edit**.
-2. Click **BibTeX / RIS…**, or drop a citation file onto its drop area.
-3. Choose whether to fill the form from the citation metadata.
-4. If the file contains multiple records, select the record to use.
-5. Review the fields, supply any missing required information, and click **Add** or **Update**.
-
-The original citation file is retained as an attachment. Only one citation attachment is supported per entry; when several files are dropped together, the first is used. Use **View BibTeX / RIS** to open the saved attachment in the system's associated application.
-
-### Paste a citation
-
-1. Click **Paste…** beside the citation attachment.
-2. Paste BibTeX or RIS text, or click **Paste from clipboard**.
-3. Click **Fill Form** to extract metadata.
-4. With an entry title entered, click **Save citation** to attach the text.
-5. Click **Add** or **Update** to save the catalog entry.
-
-Pasted text is saved as `.ris` when a RIS record is detected; otherwise it is saved as `.bib`. **Fill Form** and **Save citation** are separate actions.
-
-RIS metadata extraction supports common title, author, year/date, journal, volume, issue, pages, DOI, ISBN/ISSN, keyword, abstract, note, and URL tags. Repeated authors and keywords and multiline field continuations are supported. Review imported metadata because citation exports vary between publishers.
-
-**Rearrange authors** changes names such as `Francis, Vineeth` to `Vineeth Francis` in the form.
-
-## LaTeX reports and Beamer slides
-
-Open the **LaTeX code** editor under the **LaTeX** workspace tab.
-
-| Button | Action |
-| --- | --- |
-| **Clear code** | Empty the LaTeX source editor |
-| **Insert default report** | Insert the existing A4 article/report template |
-| **Insert default beamer** | Insert a minimal widescreen Beamer document with two slides |
-| **New page** | Insert `\newpage` into LaTeX source |
-| **Preview** | Compile and show the PDF in **LaTeX output** when Full LaTeX is selected |
-| **Save PDF…** | Compile and save a PDF attachment |
-| **Open PDF** | Open the saved PDF in an external viewer |
-
-The template buttons insert at the cursor and select **Full LaTeX**. To start a new document, use **Clear code** before inserting a template; inserting a complete document into an existing document can cause compilation errors. The editor starts without a default template.
-
-### Report workflow
-
-1. Choose **Report** and enter its title and authors.
-2. Click **Insert default report**.
-3. Edit the title, author, date, and content in the LaTeX source.
-4. Click **Preview** and use **Previous page / Next page** to inspect the result.
-5. Click **Save PDF…**, then **Add** or **Update** to retain the source and attachment in the catalog.
-
-### Beamer workflow
-
-1. Choose an appropriate entry type, such as **Report**, and enter its metadata.
-2. Click **Clear code**, then **Insert default beamer**.
-3. Edit the presentation title, author, and introduction points.
-4. Click **Preview** or **Save PDF…**.
-5. Click **Add** or **Update** to save the catalog entry.
-
-The default contains exactly two slides: a title slide and an introduction slide with two bullet points. It uses `aspectratio=169`; compilation preserves the slide dimensions. To add slides, duplicate a `\begin{frame}{Title} ... \end{frame}` block before `\end{document}`. Use frame blocks to create new Beamer slides rather than the **New page** button.
-
-Full compilation supports up to 100 output pages and has a 120-second compilation timeout. **Quick preview** uses Matplotlib MathText for equations; use **Full LaTeX** for complete reports and slides.
-
-## Search and open attachments
-
-Use **Search Library** to search entries and filter by section/subsection. Search ignores letter case and treats punctuation as word separators; for example, `Non-Linearities` and `non linearities` match the same words.
-
-Select an entry to open its main file, supplementary files, notes, citation, LaTeX PDF, images, or entry folder using the bottom toolbar. Use **Edit Selected** to work on the selected entry and **Update** to save changes.
-
-## Images and clipboard
-
-Use the image attachment control or **Copy from clipboard**. Clipboard images are saved as PNG files in the entry's Images folder. On Windows, copied image files from File Explorer are also supported.
-
-Linux clipboard access may require:
-
-```bash
-sudo apt install xclip wl-clipboard
+```text
+Initial folder: E:\PyCat
+Final folder: C:\Users\Vineeth\Documents\LSDRM\Bibliography\PyCat
 ```
 
-These provide clipboard access for X11 and Wayland respectively.
+Replace these examples with your actual paths. The contents are copied directly into the final folder; no additional nested PyCat folder is added.
 
-## Organize files and back up
+You must run PyCat on the selected operating system. Choosing Windows on a Linux computer does not run a remote Windows backup. These are local folder paths, including mounted drives accessible to that computer.
 
-- **Organize Files** moves still-used attachments into folders matching their current entry metadata.
-- **Delete unused folders…** displays a review list before deletion. It checks the entire saved catalog, including entries hidden by search filters, and protects referenced attachments and the current upload form.
-- To back up or move the catalog, close PyCat and copy the complete application folder, including the database and `NMR_Library`.
-- Keep a Python environment on each computer; recreate it there rather than moving a virtual environment between operating systems.
+### Backing up while PyCat is open
 
-## Troubleshooting
+1. Click **Add** or **Update** to save any form edits you want in the backup.
+2. Open **Backup** and choose the source, destination, mode, and verbosity.
+3. Review both paths and click **Start backup**.
+4. Wait for **Backup complete** or **Mirror backup complete** before disconnecting a drive.
 
-| Problem | Action |
-| --- | --- |
-| `No module named tkinter` | Install the system's Tkinter package; on Ubuntu/Debian use `sudo apt install python3-tk`. |
-| No graphical display / `$DISPLAY` error | Run from a graphical desktop session; a terminal-only session cannot display this GUI. |
-| Drag-and-drop unavailable | Install `tkinterdnd2` in the active environment and restart PyCat; browsing remains available. |
-| `pdflatex` missing or Beamer class not found | Install the LaTeX packages listed above, or install Beamer through your Windows LaTeX distribution. |
-| PDF export works but preview fails | Check that `pdftoppm` is on PATH and `pillow` is installed. |
-| LaTeX fails after inserting a template | Keep only one complete document, with one document class and one document environment. |
-| Citation metadata is incomplete | Review the citation text and complete missing fields manually before saving. |
-| Attachment cannot be found after moving | Move the database, script, and entire `NMR_Library` together. |
+Catalog editing and the other tabs are temporarily disabled during the transfer. The window remains responsive, and Cancel stays available. If the source includes the running catalog database, PyCat makes a consistent **SQLite snapshot**, copies the other files, then publishes the snapshot at the corresponding destination path. This avoids copying a live SQLite database as an ordinary changing file. Obsolete destination SQLite sidecar files for that database are removed before publishing the snapshot.
 
-## Changes in v1.0.18
+Unsaved form text is not automatically saved. Close other PyCat instances or applications that may change the selected folders. The snapshot handling covers this running program's database; other databases in the source should be closed before copying. Live database journal/WAL sidecars are intentionally not copied for this database; a consistent snapshot is used instead, so source and destination byte totals can differ even in Mirror mode.
 
-- Added RIS support alongside BibTeX for citation attachments, drag-and-drop, pasted text, and metadata extraction.
-- Renamed **Insert default code** to **Insert default report**.
-- Added **Insert default beamer** with a minimal two-slide template.
-- Preserved document page dimensions during compilation, including widescreen Beamer slides.
+The destination must be separate from the source. Identical/nested folders, drive/filesystem roots, and destinations containing the running PyCat database are rejected. Do not use a destination that another application has open for writing.
+
+The integrated tab does not need the separate `.sh` or `.bat` scripts. When using the standalone scripts, continue to close PyCat first.
+
+### Copy engines and output
+
+- **Linux:** rsync. Backup mode compares sizes/modification times; Mirror additionally checks content using checksums and uses delayed deletion. Verbose mode lists file changes.
+- **Windows:** Robocopy. Backup uses `/E`; Mirror uses `/MIR` and also recopies same-metadata files with `/IS /IT`. Directory junctions are skipped with `/XJ`. Robocopy codes 0–7 are treated as non-failing; other results report an incomplete/failed transfer.
+
+Errors and cancellation are shown in the status/output panel. After cancellation, fix any issue and rerun the backup to finish. The output panel retains the latest 10,000 lines during large verbose transfers. Folder sizes can differ in Backup mode because destination-only files are deliberately retained. Linked directories and platform-specific metadata can also differ; this is a folder-content backup rather than a system-image backup.
+
+## Multiple websites
+
+1. Open **Upload / Edit** and select **Websites**.
+2. Enter the required **Title**, **Section**, and **Subsection**.
+3. Enter addresses in **Websites (one per line)**, or use **Add website…** repeatedly.
+4. Enter any plain-text notes you want to keep.
+5. Click **Add** for a new entry or **Update** for an existing one.
+
+Example:
+
+```text
+https://www.cnrs.fr
+https://www.cea.fr
+https://example.org/resources
+```
+
+Use **Open website** to open a link in your default browser. With one link, it opens directly. With multiple links, a list appears: select a link and click **Open selected website**, or double-click it. The chooser stays open so you can open another link.
+
+Addresses without a scheme are given `https://` when added or opened. Only HTTP/HTTPS links are opened. The Add website action avoids duplicate normalized links. To edit or remove links, edit their lines in the field and click **Update**.
+
+Existing single-link Conference and Researchers entries remain compatible. Their existing Open website button also supports a list if entered. Existing Websites notes remain unchanged; when the website field is empty, Open website can find HTTP/HTTPS links in old plain-text notes. New links are saved in the existing database website field and included in the automatic CSV.
+
+## Existing catalog workflow
+
+Search Library continues to support field search, type/section/subsection filters, and case/punctuation-insensitive word matching. Upload / Edit retains the existing category-specific fields, multiple lecture PDFs, supplementary files, image/clipboard attachments, BibTeX/RIS metadata handling, plain text, and LaTeX/PDF features.
+
+**Organize Files** and **Delete unused folders…** retain their existing behavior and positions. No unrelated catalog behavior was changed for this release.
+
+## Validation
+
+The Linux copy engine was tested with temporary source/destination folders, ordinary backup, mirror deletion, equal-size/time file changes, hidden files, cancellation, path checks, folder sizes, and a live WAL-mode SQLite snapshot. Website parsing and saved multiple-link entries were checked. Windows command construction was checked; an actual Windows transfer and live desktop UI require testing on your computer.

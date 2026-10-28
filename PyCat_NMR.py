@@ -18,6 +18,7 @@ import io
 import filecmp
 import csv
 import os
+import queue
 import re
 import shutil
 import sqlite3
@@ -29,6 +30,7 @@ import threading
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 import webbrowser
+from urllib.parse import urlsplit
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 try:
@@ -52,7 +54,7 @@ ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Rep
 PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Note", "Image", "Equation")
 
 
-APP_VERSION = "1.0.18"
+APP_VERSION = "1.0.19"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -170,10 +172,205 @@ Unused empty categories are not recreated at startup.
 """
 
 
+SETUP_README += """
+
+BACKUP TAB (LINUX / WINDOWS)
+
+Choose the operating system running PyCat, then enter the Initial/source and
+Final/destination folders or use Browse. Folder sizes refresh after path edits;
+Refresh folder sizes recalculates them. Sizes are logical regular-file bytes,
+not allocated disk space; links/junctions are excluded from the totals.
+
+Backup copies new/changed files and keeps destination-only files. Mirror also
+deletes destination-only files and folders after confirmation. Verbose output
+shows individual file details; otherwise the output is a summary. Use Start
+backup to run, or Cancel to stop. Cancellation can leave an incomplete backup.
+
+Linux needs rsync: sudo apt install rsync
+Windows uses its built-in Robocopy. Run on the chosen OS, with local paths.
+No external .sh or .bat files are needed for the Backup tab.
+
+Save entries with Add/Update before starting. The Backup tab can run while
+PyCat is open: it temporarily pauses catalog editing and includes a consistent
+SQLite snapshot when the source contains this running catalog's database.
+Unsaved form text is not saved automatically. Close other apps/PyCat instances
+that might change the chosen folders. Keep the destination separate from the
+running catalog. The standalone backup scripts still require PyCat to be closed.
+
+MULTIPLE WEBSITE LINKS
+
+Choose Websites in Upload / Edit. Add one address per line in the Websites
+field, or click Add website. Title, Section and Subsection remain required.
+Use Add or Update to save. Open website opens one link directly, or lets you
+select a link when several are saved. Plain-text notes remain available.
+Old single-link entries remain compatible. If a legacy Websites entry has no
+website field, Open website can also find http(s) links in its plain-text notes.
+"""
+
+
 def normalize_search_text(value):
     """Case-fold Unicode text and treat punctuation/symbols as word separators."""
     text = unicodedata.normalize("NFC", value or "").casefold()
     return " ".join(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
+
+
+def backup_folder_path(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    if not value:
+        raise ValueError("Enter both initial and final folder paths.")
+    return os.path.realpath(os.path.abspath(os.path.expandvars(os.path.expanduser(value))))
+
+
+def path_is_inside(path, parent):
+    try:
+        return os.path.commonpath((os.path.normcase(path), os.path.normcase(parent))) == os.path.normcase(parent)
+    except ValueError:
+        return False
+
+
+def validate_backup_paths(source, destination, active_database=None):
+    source, destination = backup_folder_path(source), backup_folder_path(destination)
+    if not os.path.isdir(source):
+        raise ValueError("The initial/source folder does not exist.")
+    if os.path.lexists(destination) and not os.path.isdir(destination):
+        raise ValueError("The final/destination path is not a folder.")
+    for path in (source, destination):
+        if os.path.dirname(path) == path:
+            raise ValueError("Choose a folder, not a drive or filesystem root.")
+    if path_is_inside(source, destination) or path_is_inside(destination, source):
+        raise ValueError("Choose separate folders, neither inside the other.")
+    if active_database and path_is_inside(os.path.realpath(active_database), destination):
+        raise ValueError("The destination contains the running PyCat database. Choose a separate backup folder.")
+    return source, destination
+
+
+def backup_folder_size(path):
+    """Logical size of regular files, skipping links/junctions; count unreadable items."""
+    total = count = errors = 0
+    if not os.path.exists(path):
+        return 0, 0, 0
+    if not os.path.isdir(path):
+        raise ValueError("Not a folder.")
+    pending = [path]
+    while pending:
+        folder = pending.pop()
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(entry.path)):
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                            count += 1
+                    except OSError:
+                        errors += 1
+        except OSError:
+            errors += 1
+    return total, count, errors
+
+
+def backup_copy_command(source, destination, platform, mirror, verbose, snapshot_relative=None):
+    if platform == "Linux":
+        executable = shutil.which("rsync")
+        if not executable:
+            raise RuntimeError("Install rsync first: sudo apt install rsync")
+        command = [executable, "-rltc" if mirror else "-rlt", "--partial", "--human-readable", "--stats"]
+        if mirror:
+            command.append("--delete-delay")
+        if verbose:
+            command.extend(("--verbose", "--itemize-changes"))
+        if snapshot_relative:
+            literal = snapshot_relative.replace(os.sep, "/")
+            literal = "".join("\\" + c if c in "\\*?[" else c for c in literal)
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                command.append("--exclude=/" + literal + suffix)
+        return command + ["--", source + os.sep, destination + os.sep]
+    if platform == "Windows":
+        executable = shutil.which("robocopy")
+        if not executable:
+            raise RuntimeError("Robocopy is not available on this computer.")
+        command = [executable, source, destination, "/MIR" if mirror else "/E",
+                   "/COPY:DAT", "/DCOPY:T", "/R:2", "/W:2", "/XJ", "/NP"]
+        if mirror:
+            command.extend(("/IS", "/IT"))
+        command.extend(("/V", "/FP") if verbose else ("/NFL", "/NDL"))
+        if snapshot_relative:
+            command.append("/XF")
+            command.extend(os.path.join(source, snapshot_relative) + suffix
+                           for suffix in ("", "-wal", "-shm", "-journal"))
+        return command
+    raise ValueError("Choose Linux or Windows.")
+
+
+def execute_folder_backup(source, destination, platform, mirror, verbose, emit, cancel,
+                          snapshot=None, process_changed=lambda process: None):
+    """Background copy; emit log messages without calling Tk from the worker."""
+    relative = snapshot[1] if snapshot else None
+    command = backup_copy_command(source, destination, platform, mirror, verbose, relative)
+    if cancel.is_set():
+        raise RuntimeError("Backup cancelled; the destination may be incomplete.")
+    os.makedirs(destination, exist_ok=True)
+    emit("Running " + ("Robocopy" if platform == "Windows" else "rsync") + "…\n")
+    kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT,
+              "text": True, "errors": "replace", "bufsize": 1}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    with subprocess.Popen(command, **kwargs) as process:
+        process_changed(process)
+        try:
+            if cancel.is_set():
+                process.terminate()
+            for line in process.stdout:
+                emit(line)
+                if cancel.is_set() and process.poll() is None:
+                    process.terminate()
+            code = process.wait()
+        finally:
+            process_changed(None)
+    if cancel.is_set():
+        raise RuntimeError("Backup cancelled; the destination may be incomplete.")
+    if (platform == "Windows" and not 0 <= code < 8) or (platform == "Linux" and code != 0):
+        raise RuntimeError(f"Copy failed or was incomplete (exit code {code}). See the output above.")
+    if snapshot:
+        target = os.path.join(destination, relative)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        # Publish the consistent database only after the other files copy successfully.
+        descriptor, temporary = tempfile.mkstemp(prefix=".pycat-db-", dir=os.path.dirname(target))
+        os.close(descriptor)
+        try:
+            shutil.copy2(snapshot[0], temporary)
+            for suffix in ("-wal", "-shm", "-journal"):
+                if os.path.exists(target + suffix):
+                    os.remove(target + suffix)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        emit("Saved a consistent copy of the PyCat database.\n")
+    return "Mirror backup complete." if mirror else "Backup complete."
+
+
+def website_links(text):
+    links = []
+    for value in text.split():
+        if not value:
+            continue
+        if not value.lower().startswith(("http://", "https://")):
+            if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", value):
+                raise ValueError("Use http:// or https:// website links.")
+            value = "https://" + value
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            raise ValueError(f"Invalid website link: {value}")
+        value = parsed.geturl()
+        if value not in links:
+            links.append(value)
+    return links
 
 
 def open_with_system(path_or_url):
@@ -335,6 +532,7 @@ class NMRCatalog(CatalogWindow):
         body.add(upload_tab, text="Upload / Edit")
         self.tabs = body
         self._build_readme_tab(body)
+        self._build_backup_tab(body)
 
         # Scroll metadata independently so Add/Update remain accessible on small screens.
         editor = ttk.Panedwindow(upload_tab, orient="horizontal")
@@ -399,12 +597,23 @@ class NMRCatalog(CatalogWindow):
             elif key in ("section", "subsection"):
                 widget = ttk.Combobox(form, textvariable=var, state="normal",
                                      postcommand=self.update_entry_suggestions)
+            elif key == "website":
+                widget = tk.Text(form, height=3, width=30, wrap="none", undo=True)
+                self.website_text = widget
+                var.trace_add("write", self._sync_website_editor)
+                widget.bind("<<Modified>>", self._website_editor_changed)
             else:
                 widget = ttk.Entry(form, textvariable=var, state="readonly" if key in ("file_link", "lecture_pdf_paths") else "normal")
             self.field_widgets[key] = widget
             widget.grid(row=row, column=1, columnspan=2 if key == "item_type" else 1, sticky="ew", pady=(0, 8))
 
         self.fields["section"].trace_add("write", self.update_entry_suggestions)
+        website_actions = ttk.Frame(form)
+        website_actions.grid(row=int(self.field_widgets["website"].grid_info()["row"]),
+                             column=2, padx=(6, 0), sticky="w")
+        self.attachment_actions["website"] = website_actions
+        ttk.Button(website_actions, text="Add website…", command=self.add_website_link).pack(side="left")
+        ttk.Button(website_actions, text="Open website", command=self.open_conference_website).pack(side="left", padx=5)
 
         self.rearrange_authors_button = ttk.Button(
             form, text="Rearrange authors", command=self.rearrange_authors
@@ -529,6 +738,255 @@ class NMRCatalog(CatalogWindow):
                 row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0))
             actions.columnconfigure(column, weight=1)
 
+
+    def _build_backup_tab(self, notebook):
+        self.backup_tab = ttk.Frame(notebook, padding=12)
+        notebook.add(self.backup_tab, text="Backup")
+        tab = self.backup_tab
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(9, weight=1)
+        self._backup_events = queue.Queue()
+        self._backup_busy = False
+        self._backup_process = None
+        self._backup_close_after = False
+        self._backup_cancel = threading.Event()
+        self._backup_size_job = None
+        self._backup_size_generation = 0
+        self.backup_platform = tk.StringVar(value="Windows" if sys.platform == "win32" else "Linux")
+        self.backup_mode = tk.StringVar(value="Backup — keep destination-only files")
+        self.backup_source = tk.StringVar()
+        self.backup_destination = tk.StringVar()
+        self.backup_verbose = tk.BooleanVar(value=True)
+        self.backup_source_size = tk.StringVar(value="Not calculated")
+        self.backup_destination_size = tk.StringVar(value="Not calculated")
+        self.backup_status = tk.StringVar(value="Choose the initial and final folders.")
+        ttk.Label(tab, text="Operating system").grid(row=0, column=0, sticky="w", pady=4)
+        platform = ttk.Combobox(tab, textvariable=self.backup_platform,
+                               values=("Linux", "Windows"), state="readonly", width=16)
+        platform.grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(tab, text="Mode").grid(row=1, column=0, sticky="w", pady=4)
+        mode = ttk.Combobox(tab, textvariable=self.backup_mode, state="readonly", width=48,
+            values=("Backup — keep destination-only files", "Mirror — delete destination-only files"))
+        mode.grid(row=1, column=1, sticky="w", pady=4)
+        self._backup_controls = [platform, mode]
+        for row, label, variable, size in (
+            (2, "Initial folder (source)", self.backup_source, self.backup_source_size),
+            (4, "Final folder (destination)", self.backup_destination, self.backup_destination_size),
+        ):
+            ttk.Label(tab, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
+            entry = ttk.Entry(tab, textvariable=variable)
+            entry.grid(row=row, column=1, sticky="ew", pady=4)
+            button = ttk.Button(tab, text="Browse…", command=lambda v=variable: self._browse_backup_folder(v))
+            button.grid(row=row, column=2, padx=(6, 0), pady=4)
+            ttk.Label(tab, textvariable=size).grid(row=row+1, column=1, sticky="w")
+            self._backup_controls.extend((entry, button))
+            variable.trace_add("write", self._schedule_backup_sizes)
+        verbose = ttk.Checkbutton(tab, text="Verbose output (show individual files)", variable=self.backup_verbose)
+        verbose.grid(row=6, column=1, sticky="w", pady=8)
+        self._backup_controls.append(verbose)
+        actions = ttk.Frame(tab)
+        actions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=6)
+        self.backup_start_button = ttk.Button(actions, text="Start backup", command=self.start_backup)
+        self.backup_start_button.pack(side="left")
+        self.backup_cancel_button = ttk.Button(actions, text="Cancel", command=self.cancel_backup, state="disabled")
+        self.backup_cancel_button.pack(side="left", padx=5)
+        self.backup_sizes_button = ttk.Button(actions, text="Refresh folder sizes", command=self.refresh_backup_sizes)
+        self.backup_sizes_button.pack(side="left", padx=5)
+        self._backup_controls.append(self.backup_start_button)
+        ttk.Label(tab, textvariable=self.backup_status, wraplength=1000).grid(
+            row=8, column=0, columnspan=3, sticky="w", pady=6)
+        output = ttk.Frame(tab)
+        output.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        self.backup_log = tk.Text(output, height=14, wrap="word", state="disabled")
+        scroll = ttk.Scrollbar(output, command=self.backup_log.yview)
+        self.backup_log.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.backup_log.pack(fill="both", expand=True)
+        ttk.Label(tab, text="Sizes show regular-file content bytes, excluding links/junctions. "
+            "Save entries before backing up; close any other PyCat instances using these folders.",
+            wraplength=1000).grid(row=10, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self._backup_poll_job = self.after(150, self._poll_backup_events)
+
+    def _browse_backup_folder(self, variable):
+        path = filedialog.askdirectory(title="Select backup folder", mustexist=False)
+        if path:
+            variable.set(path)
+
+    def _schedule_backup_sizes(self, *_args):
+        self._backup_size_generation += 1
+        if self._backup_size_job is not None:
+            self.after_cancel(self._backup_size_job)
+        self._backup_size_job = self.after(500, self.refresh_backup_sizes)
+
+    def refresh_backup_sizes(self):
+        self._backup_size_job = None
+        self._backup_size_generation += 1
+        generation = self._backup_size_generation
+        paths = (("source", self.backup_source.get()), ("destination", self.backup_destination.get()))
+        self.backup_source_size.set("Calculating…")
+        self.backup_destination_size.set("Calculating…")
+
+        def calculate():
+            for kind, raw in paths:
+                try:
+                    path = backup_folder_path(raw)
+                    total, count, errors = backup_folder_size(path)
+                    text = f"{total:,} bytes ({total / (1024 ** 2):,.2f} MiB), {count:,} files"
+                    if not os.path.exists(path):
+                        text += " — folder not created yet"
+                    if errors:
+                        text += f" — partial size, {errors} unreadable items"
+                except (ValueError, OSError) as error:
+                    text = str(error) if raw.strip() else "Choose a folder"
+                self._backup_events.put(("size", (generation, kind, text)))
+        threading.Thread(target=calculate, daemon=True).start()
+
+    def _backup_append_log(self, text):
+        self.backup_log.configure(state="normal")
+        self.backup_log.insert("end", text)
+        # Bound log memory when Verbose is enabled on large libraries.
+        lines = int(self.backup_log.index("end-1c").split(".")[0])
+        if lines > 10000:
+            self.backup_log.delete("1.0", f"{lines-10000}.0")
+        self.backup_log.see("end")
+        self.backup_log.configure(state="disabled")
+
+    def _set_backup_busy(self, busy):
+        self._backup_busy = busy
+        if busy:
+            self._backup_saved_states = []
+            def disable(parent):
+                for widget in parent.winfo_children():
+                    if widget is self.backup_tab:
+                        continue
+                    if isinstance(widget, (ttk.Button, ttk.Entry, ttk.Combobox, ttk.Radiobutton,
+                                           ttk.Checkbutton, tk.Text)):
+                        self._backup_saved_states.append((widget, str(widget.cget("state"))))
+                        widget.configure(state="disabled")
+                    disable(widget)
+            disable(self)
+            self._backup_tab_states = [(tab, self.tabs.tab(tab, "state")) for tab in self.tabs.tabs()
+                                       if tab != str(self.backup_tab)]
+            for tab, _state in self._backup_tab_states:
+                self.tabs.tab(tab, state="disabled")
+            self._backup_control_states = [(w, str(w.cget("state"))) for w in self._backup_controls]
+            for widget, _state in self._backup_control_states:
+                widget.configure(state="disabled")
+        else:
+            for widget, state in self._backup_saved_states + self._backup_control_states:
+                widget.configure(state=state)
+            for tab, state in self._backup_tab_states:
+                self.tabs.tab(tab, state=state)
+        self.backup_cancel_button.configure(state="normal" if busy else "disabled")
+
+    def start_backup(self):
+        if self._backup_busy:
+            return
+        temporary = None
+        try:
+            source, destination = validate_backup_paths(self.backup_source.get(), self.backup_destination.get(), DB_PATH)
+            platform = self.backup_platform.get()
+            actual = "Windows" if sys.platform == "win32" else "Linux" if sys.platform.startswith("linux") else None
+            if actual != platform:
+                raise ValueError("Choose the operating system running this copy of PyCat (Linux or Windows).")
+            if self._pdf_future is not None or self._latex_future is not None:
+                raise ValueError("Wait for the current PDF export or preview to finish before backing up.")
+            mirror = self.backup_mode.get().startswith("Mirror")
+            verbose = self.backup_verbose.get()
+            backup_copy_command(source, destination, platform, mirror, verbose)
+            if mirror and not messagebox.askyesno(APP_TITLE,
+                f"Mirror this folder?\n\nSource: {source}\nDestination: {destination}\n\n"
+                "Files and folders found only in the destination will be permanently deleted."):
+                return
+            snapshot = None
+            if path_is_inside(os.path.realpath(DB_PATH), source):
+                temporary = tempfile.TemporaryDirectory(prefix="pycat_backup_")
+                if path_is_inside(temporary.name, source) or path_is_inside(temporary.name, destination):
+                    raise ValueError("Choose a more specific source/destination folder so temporary database files remain outside it.")
+                self.conn.commit()
+                self.sync_csv()
+                snapshot_path = os.path.join(temporary.name, "nmr_catalog.db")
+                snapshot_conn = sqlite3.connect(snapshot_path)
+                try:
+                    self.conn.backup(snapshot_conn)
+                finally:
+                    snapshot_conn.close()
+                snapshot = (snapshot_path, os.path.relpath(os.path.realpath(DB_PATH), source))
+            self._backup_cancel.clear()
+            self._backup_close_after = False
+            self.backup_log.configure(state="normal")
+            self.backup_log.delete("1.0", "end")
+            self.backup_log.configure(state="disabled")
+            self._backup_append_log(f"Source: {source}\nDestination: {destination}\n"
+                                    f"Mode: {'Mirror' if mirror else 'Backup'}\n")
+            self._set_backup_busy(True)
+            self.backup_status.set("Backup running… Saved catalog editing is paused until it finishes.")
+        except Exception as error:
+            if temporary is not None:
+                temporary.cleanup()
+            messagebox.showerror(APP_TITLE, f"Could not start backup:\n{error}")
+            return
+
+        def copy():
+            ok = False
+            try:
+                text = execute_folder_backup(source, destination, platform, mirror, verbose,
+                    lambda line: self._backup_events.put(("log", line)), self._backup_cancel,
+                    snapshot, lambda process: setattr(self, "_backup_process", process))
+                ok = True
+            except Exception as error:
+                text = str(error)
+            finally:
+                if temporary is not None:
+                    try:
+                        temporary.cleanup()
+                    except OSError as error:
+                        ok = False
+                        text += f"\nCould not remove temporary database files: {error}"
+                self._backup_events.put(("done", (ok, text)))
+        try:
+            threading.Thread(target=copy, daemon=True).start()
+        except RuntimeError as error:
+            self._set_backup_busy(False)
+            if temporary is not None:
+                temporary.cleanup()
+            self.backup_status.set(f"Could not start backup: {error}")
+
+    def cancel_backup(self):
+        if not self._backup_busy:
+            return
+        self._backup_cancel.set()
+        self.backup_status.set("Cancelling backup… The destination may be incomplete.")
+        process = self._backup_process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    def _poll_backup_events(self):
+        for _ in range(400):
+            try:
+                kind, value = self._backup_events.get_nowait()
+            except queue.Empty:
+                break
+            if kind == "log":
+                self._backup_append_log(value)
+            elif kind == "size":
+                generation, side, text = value
+                if generation == self._backup_size_generation:
+                    (self.backup_source_size if side == "source" else self.backup_destination_size).set(text)
+            elif kind == "done":
+                ok, text = value
+                self._set_backup_busy(False)
+                self.backup_status.set(text)
+                self._backup_append_log(text + "\n")
+                self.refresh_backup_sizes()
+                if self._backup_close_after:
+                    self._backup_poll_job = None
+                    self.after_idle(self.close_app)
+                    return
+        self._backup_poll_job = self.after(150, self._poll_backup_events)
 
     def _build_readme_tab(self, notebook):
         tab = ttk.Frame(notebook, padding=12)
@@ -797,14 +1255,84 @@ Describe the background and objectives of this report.
         except Exception as error:
             messagebox.showerror(APP_TITLE, str(error))
 
-    def open_conference_website(self):
-        url = self.fields["website"].get().strip()
-        if self.fields["item_type"].get() not in ("Conference", "Researchers") or not url:
-            messagebox.showinfo(APP_TITLE, "Select a conference or researcher and enter a website.")
+    def _sync_website_editor(self, *_args):
+        value = self.fields["website"].get()
+        if self.website_text.get("1.0", "end-1c") != value:
+            self.website_text.delete("1.0", "end")
+            self.website_text.insert("1.0", value)
+            self.website_text.edit_modified(False)
+
+    def _website_editor_changed(self, _event=None):
+        if self.website_text.edit_modified():
+            self.website_text.edit_modified(False)
+            self.fields["website"].set(self.website_text.get("1.0", "end-1c"))
+
+    def add_website_link(self):
+        value = simpledialog.askstring(APP_TITLE, "Website address (http:// or https://):", parent=self)
+        if value is None or not value.strip():
             return
-        if not url.startswith(("https://", "http://")):
-            url = "https://" + url
-        open_with_system(url)
+        try:
+            links = website_links(self.fields["website"].get() + "\n" + value)
+        except ValueError as error:
+            messagebox.showwarning(APP_TITLE, str(error))
+            return
+        self.fields["website"].set("\n".join(links))
+
+    def open_conference_website(self):
+        kind = self.fields["item_type"].get()
+        if kind not in ("Conference", "Researchers", "Websites"):
+            messagebox.showinfo(APP_TITLE, "Select a conference, researcher, or Websites entry first.")
+            return
+        raw = self.fields["website"].get().strip()
+        if not raw and kind == "Websites":
+            # Older Websites entries kept their links only in plain-text notes.
+            raw = "\n".join(link.rstrip(".,") for link in re.findall(
+                r"https?://[^\s<>\"']+", self.notes.get("1.0", "end-1c"), flags=re.IGNORECASE))
+        try:
+            links = website_links(raw)
+        except ValueError as error:
+            messagebox.showwarning(APP_TITLE, str(error))
+            return
+        if not links:
+            messagebox.showinfo(APP_TITLE, "Add one or more website addresses first, one per line.")
+            return
+
+        def open_link(link):
+            try:
+                open_with_system(link)
+            except Exception as error:
+                messagebox.showerror(APP_TITLE, f"Could not open website:\n{error}")
+        if len(links) == 1:
+            open_link(links[0])
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Choose website")
+        dialog.geometry("740x340")
+        dialog.transient(self)
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Select a website to open in your browser.").pack(anchor="w", pady=(0, 8))
+        listing = ttk.Frame(frame)
+        listing.pack(fill="both", expand=True)
+        choices = tk.Listbox(listing, exportselection=False)
+        scroll = ttk.Scrollbar(listing, command=choices.yview)
+        choices.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        choices.pack(fill="both", expand=True)
+        for link in links:
+            choices.insert("end", link)
+        choices.selection_set(0)
+
+        def open_selected(_event=None):
+            selected = choices.curselection()
+            if selected:
+                open_link(links[selected[0]])
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(8, 0))
+        ttk.Button(actions, text="Open selected website", command=open_selected).pack(side="left")
+        ttk.Button(actions, text="Close", command=dialog.destroy).pack(side="right")
+        choices.bind("<Double-1>", open_selected)
+        dialog.grab_set()
 
     def _equation_modified(self, _event=None):
         if not self.equation_text.edit_modified():
@@ -925,7 +1453,8 @@ Describe the background and objectives of this report.
         if kind == "Researchers":
             visible = {"item_type", "title", "website", "section", "subsection"}
         elif kind == "Websites":
-            visible = common
+            visible = common | {"website"}
+        self.field_labels["website"].configure(text="Websites (one per line)" if kind == "Websites" else "Website")
         for key, widget in self.field_widgets.items():
             if key in visible:
                 self.field_labels[key].grid()
@@ -1214,8 +1743,7 @@ Describe the background and objectives of this report.
         values["notes"] = self.notes.get("1.0", "end").strip()
         if kind in ("Researchers", "Websites"):
             keep = {"item_type", "title", "notes", "section", "subsection"}
-            if kind == "Researchers":
-                keep.add("website")
+            keep.add("website")
             for key in values:
                 if key not in keep:
                     values[key] = ""
@@ -2633,6 +3161,14 @@ Describe the background and objectives of this report.
         self.tree.heading(column, command=lambda: self.sort_table(column, not reverse))
 
     def close_app(self):
+        if getattr(self, "_backup_busy", False):
+            if messagebox.askyesno(APP_TITLE, "Cancel the running backup and close when it stops?"):
+                self._backup_close_after = True
+                self.cancel_backup()
+            return
+        for job in (getattr(self, "_backup_poll_job", None), getattr(self, "_backup_size_job", None)):
+            if job is not None:
+                self.after_cancel(job)
         if self._preview_job is not None:
             self.after_cancel(self._preview_job)
         if self._latex_poll_job is not None:
