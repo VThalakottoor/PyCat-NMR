@@ -1,4 +1,4 @@
-# PyCat NMR v1.0.19
+# PyCat NMR v1.0.21
 
 **Python Catalog for NMR**  
 **Author:** Vineeth Francis Thalakottoor  
@@ -6,7 +6,16 @@
 
 PyCat is a local desktop catalog for papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites. It uses Python, Tkinter, and SQLite.
 
-This update uses the uploaded **v1.0.18** program as its base. It adds a **Backup** tab and multiple website links. Existing catalog features, citation support (including RIS), file organization, search behavior, and table/button order are retained.
+This update uses the uploaded **v1.0.20** program as its base. It adds search reset, visible backup-mode buttons, and entry creation dates. Existing backup folder history, website links, attachments, and citation features are retained.
+
+## New in v1.0.21
+
+- **Reset** beside the search filters clears the search box and restores **All fields**, **All** entry types, **All sections**, and **All subsections**. The full library is displayed again and focus returns to the search box.
+- Backup mode is selected with two always-visible, mutually exclusive radio buttons: **Backup — keep destination-only files** and **Mirror — delete destination-only files**. Copying and mirror confirmation work as before.
+- **Creation date** is the first Search Library column, followed by **Type → Section → Subsection → Title → Authors → Year → Journal / Publisher / University**. Click its heading to sort by creation time.
+- Creation date is the entry's creation timestamp in PyCat, **not the original PDF's filesystem birth date**. It applies to every entry type, including entries without an attached file. Dates use SQLite's UTC `YYYY-MM-DD HH:MM:SS` format and remain unchanged when an entry is edited, renamed, or reorganized.
+- Existing recorded creation dates are preserved. For a legacy entry with a missing creation timestamp, its stored last-update timestamp is used as a fallback; if that is also missing, the date of this upgrade is recorded. These fallbacks cannot recover an unknown original creation date.
+- The automatic CSV now includes `created_at` as its first column. Backup source/destination dropdown history continues to be remembered across sessions.
 
 ## Files to keep together
 
@@ -95,7 +104,7 @@ The Backup tab uses Windows' built-in **Robocopy**. For full LaTeX previews, ins
 | Control | Meaning |
 |---|---|
 | Operating system | Choose **Linux** or **Windows**, matching the computer running PyCat. |
-| Mode | Choose ordinary Backup or Mirror. |
+| Mode | Use the visible radio buttons to choose ordinary Backup or Mirror. |
 | Initial folder (source) | The folder containing the current files to copy. |
 | Final folder (destination) | The folder where the backup should be stored. |
 | Browse… | Select a folder instead of typing its path. |

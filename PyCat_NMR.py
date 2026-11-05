@@ -15,6 +15,7 @@ PyCat directory can move between Linux, Windows, and macOS on a USB drive.
 
 import base64
 import io
+import json
 import filecmp
 import csv
 import os
@@ -54,7 +55,7 @@ ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Rep
 PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Note", "Image", "Equation")
 
 
-APP_VERSION = "1.0.19"
+APP_VERSION = "1.0.21"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -205,6 +206,23 @@ Use Add or Update to save. Open website opens one link directly, or lets you
 select a link when several are saved. Plain-text notes remain available.
 Old single-link entries remain compatible. If a legacy Websites entry has no
 website field, Open website can also find http(s) links in its plain-text notes.
+"""
+
+
+SETUP_README += """
+
+SEARCH RESET AND CREATION DATES
+
+Reset clears the search box and restores All fields, All entry types,
+All sections, and All subsections. Creation date is the first library column.
+It records when the entry was added to PyCat (UTC), not the source PDF's
+filesystem creation date. Edits and renaming do not change this timestamp.
+Existing dates are retained. Missing legacy dates fall back to the recorded
+last-update time, or the upgrade time if neither timestamp is available.
+The automatic CSV includes created_at as its first column.
+
+Backup mode now uses two visible buttons: Backup and Mirror. Backup path
+history remains available in the source/destination dropdowns across restarts.
 """
 
 
@@ -453,10 +471,21 @@ class NMRCatalog(CatalogWindow):
             "equation_renderer": "TEXT", "equation_pdf_path": "TEXT",
             "lecture_pdf_paths": "TEXT", "website": "TEXT", "place": "TEXT",
             "report_date": "TEXT", "notes_pdf_path": "TEXT",
+            "created_at": "TEXT", "updated_at": "TEXT",
         }
         for column, data_type in migrations.items():
             if column not in existing:
                 self.conn.execute(f"ALTER TABLE literature ADD COLUMN {column} {data_type}")
+        # Keep known creation dates; fill only missing dates in legacy catalogs.
+        self.conn.execute("UPDATE literature SET created_at = COALESCE("
+                          "NULLIF(trim(updated_at), ''), CURRENT_TIMESTAMP) "
+                          "WHERE created_at IS NULL OR trim(created_at) = ''")
+        self.conn.execute("""CREATE TRIGGER IF NOT EXISTS literature_fill_created_at
+            AFTER INSERT ON literature
+            WHEN NEW.created_at IS NULL OR trim(NEW.created_at) = ''
+            BEGIN
+                UPDATE literature SET created_at=CURRENT_TIMESTAMP WHERE id=NEW.id;
+            END""")
         self.conn.execute("CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, value TEXT)")
         self.conn.commit()
 
@@ -485,6 +514,7 @@ class NMRCatalog(CatalogWindow):
         ttk.Label(search_frame, text="Search:").grid(row=0, column=0, padx=(0, 5))
         self.search_var = tk.StringVar()
         search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=22)
+        self.search_entry = search_entry
         search_entry.grid(row=0, column=1, sticky="ew")
         search_entry.bind("<KeyRelease>", lambda _event: self.refresh_table())
         self.search_by_var = tk.StringVar(value="All fields")
@@ -519,10 +549,12 @@ class NMRCatalog(CatalogWindow):
         )
         self.subsection_filter_combo.grid(row=0, column=7)
         self.subsection_filter_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_table())
+        ttk.Button(search_frame, text="Reset", command=self.reset_search,
+                   style="Toolbar.TButton").grid(row=0, column=8, padx=(6, 0))
         ttk.Button(search_frame, text="Organize Files", command=self.organize_existing_files,
-                   style="Toolbar.TButton").grid(row=0, column=8, padx=(8, 0))
+                   style="Toolbar.TButton").grid(row=0, column=9, padx=(8, 0))
         ttk.Button(search_frame, text="Delete unused folders…", command=self.preview_unused_folders,
-                   style="Toolbar.TButton").grid(row=0, column=9, padx=(5, 0))
+                   style="Toolbar.TButton").grid(row=0, column=10, padx=(5, 0))
 
         body = ttk.Notebook(self)
         body.pack(fill="both", expand=True, padx=14, pady=(0, 14))
@@ -697,12 +729,12 @@ class NMRCatalog(CatalogWindow):
         self.fields["item_type"].trace_add("write", self.update_type_controls)
         self.update_type_controls()
 
-        columns = ("type", "title", "authors", "year", "section", "subsection", "source")
+        columns = ("created_at", "type", "title", "authors", "year", "section", "subsection", "source")
         self.tree = ttk.Treeview(table_frame, columns=columns,
-            displaycolumns=("type", "section", "subsection", "title", "authors", "year", "source"),
+            displaycolumns=("created_at", "type", "section", "subsection", "title", "authors", "year", "source"),
             show="headings", selectmode="browse")
-        headings = {"type": "Type", "title": "Title", "authors": "Authors", "year": "Year", "section": "Section", "subsection": "Subsection", "source": "Journal / Publisher / University"}
-        widths = {"type": 65, "title": 260, "authors": 190, "year": 60, "section": 130, "subsection": 130, "source": 170}
+        headings = {"created_at": "Creation date", "type": "Type", "title": "Title", "authors": "Authors", "year": "Year", "section": "Section", "subsection": "Subsection", "source": "Journal / Publisher / University"}
+        widths = {"created_at": 155, "type": 65, "title": 260, "authors": 190, "year": 60, "section": 130, "subsection": 130, "source": 170}
         for column in columns:
             self.tree.heading(column, text=headings[column], command=lambda c=column: self.sort_table(c, False))
             self.tree.column(column, width=widths[column], minwidth=55)
@@ -754,8 +786,10 @@ class NMRCatalog(CatalogWindow):
         self._backup_size_generation = 0
         self.backup_platform = tk.StringVar(value="Windows" if sys.platform == "win32" else "Linux")
         self.backup_mode = tk.StringVar(value="Backup — keep destination-only files")
-        self.backup_source = tk.StringVar()
-        self.backup_destination = tk.StringVar()
+        self._backup_path_history = self._load_backup_path_history()
+        self.backup_source = tk.StringVar(value=next(iter(self._backup_path_history["source"]), ""))
+        self.backup_destination = tk.StringVar(value=next(iter(self._backup_path_history["destination"]), ""))
+        self._backup_path_combos = {}
         self.backup_verbose = tk.BooleanVar(value=True)
         self.backup_source_size = tk.StringVar(value="Not calculated")
         self.backup_destination_size = tk.StringVar(value="Not calculated")
@@ -765,16 +799,24 @@ class NMRCatalog(CatalogWindow):
                                values=("Linux", "Windows"), state="readonly", width=16)
         platform.grid(row=0, column=1, sticky="w", pady=4)
         ttk.Label(tab, text="Mode").grid(row=1, column=0, sticky="w", pady=4)
-        mode = ttk.Combobox(tab, textvariable=self.backup_mode, state="readonly", width=48,
-            values=("Backup — keep destination-only files", "Mirror — delete destination-only files"))
-        mode.grid(row=1, column=1, sticky="w", pady=4)
-        self._backup_controls = [platform, mode]
+        mode = ttk.Frame(tab)
+        mode.grid(row=1, column=1, columnspan=2, sticky="w", pady=4)
+        self._backup_controls = [platform]
+        for choice in ("Backup — keep destination-only files", "Mirror — delete destination-only files"):
+            button = ttk.Radiobutton(mode, text=choice, value=choice, variable=self.backup_mode)
+            button.pack(side="left", padx=(0, 14))
+            self._backup_controls.append(button)
         for row, label, variable, size in (
             (2, "Initial folder (source)", self.backup_source, self.backup_source_size),
             (4, "Final folder (destination)", self.backup_destination, self.backup_destination_size),
         ):
             ttk.Label(tab, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
-            entry = ttk.Entry(tab, textvariable=variable)
+            side = "source" if variable is self.backup_source else "destination"
+            entry = ttk.Combobox(tab, textvariable=variable, state="normal",
+                                 values=self._backup_path_history[side])
+            self._backup_path_combos[side] = entry
+            for event in ("<FocusOut>", "<Return>", "<<ComboboxSelected>>"):
+                entry.bind(event, self._remember_backup_paths)
             entry.grid(row=row, column=1, sticky="ew", pady=4)
             button = ttk.Button(tab, text="Browse…", command=lambda v=variable: self._browse_backup_folder(v))
             button.grid(row=row, column=2, padx=(6, 0), pady=4)
@@ -806,11 +848,49 @@ class NMRCatalog(CatalogWindow):
             "Save entries before backing up; close any other PyCat instances using these folders.",
             wraplength=1000).grid(row=10, column=0, columnspan=3, sticky="w", pady=(8, 0))
         self._backup_poll_job = self.after(150, self._poll_backup_events)
+        if self.backup_source.get() or self.backup_destination.get():
+            self._schedule_backup_sizes()
+
+    def _load_backup_path_history(self):
+        history = {}
+        for side in ("source", "destination"):
+            row = self.conn.execute("SELECT value FROM settings WHERE name=?",
+                                    ("backup_" + side + "_history",)).fetchone()
+            try:
+                values = json.loads(row[0]) if row else []
+            except (ValueError, TypeError):
+                values = []
+            history[side] = list(dict.fromkeys(value.strip() for value in values
+                if isinstance(value, str) and value.strip())) if isinstance(values, list) else []
+        return history
+
+    def _remember_backup_paths(self, _event=None):
+        if getattr(self, "_closing", False) or self._backup_busy:
+            return
+        history = {side: list(values) for side, values in self._backup_path_history.items()}
+        for side, variable in (("source", self.backup_source), ("destination", self.backup_destination)):
+            value = variable.get().strip()
+            if value:
+                history[side] = [value, *(old for old in history[side] if old != value)]
+        if history == self._backup_path_history:
+            return
+        try:
+            with self.conn:
+                for side, values in history.items():
+                    self.conn.execute("INSERT OR REPLACE INTO settings (name, value) VALUES (?, ?)",
+                        ("backup_" + side + "_history", json.dumps(values, ensure_ascii=False)))
+        except sqlite3.Error as error:
+            messagebox.showwarning(APP_TITLE, f"Could not remember backup folders:\n{error}")
+            return
+        self._backup_path_history = history
+        for side, combo in self._backup_path_combos.items():
+            combo.configure(values=history[side])
 
     def _browse_backup_folder(self, variable):
         path = filedialog.askdirectory(title="Select backup folder", mustexist=False)
         if path:
             variable.set(path)
+            self._remember_backup_paths()
 
     def _schedule_backup_sizes(self, *_args):
         self._backup_size_generation += 1
@@ -882,6 +962,7 @@ class NMRCatalog(CatalogWindow):
     def start_backup(self):
         if self._backup_busy:
             return
+        self._remember_backup_paths()
         temporary = None
         try:
             source, destination = validate_backup_paths(self.backup_source.get(), self.backup_destination.get(), DB_PATH)
@@ -1849,7 +1930,22 @@ Describe the background and objectives of this report.
         for selected in self.tree.selection():
             self.tree.selection_remove(selected)
 
+    def reset_search(self):
+        self._resetting_search = True
+        try:
+            self.search_var.set("")
+            self.search_by_var.set("All fields")
+            self.filter_var.set("All")
+            self.section_filter_var.set("All sections")
+            self.subsection_filter_var.set("All subsections")
+        finally:
+            self._resetting_search = False
+        self.refresh_table()
+        self.search_entry.focus_set()
+
     def refresh_table(self):
+        if getattr(self, "_resetting_search", False):
+            return
         self.update_filter_dropdowns()
         query = self.search_var.get().strip()
         item_filter = self.filter_var.get()
@@ -1885,7 +1981,7 @@ Describe the background and objectives of this report.
         rows = self.conn.execute(sql, parameters).fetchall()
         self.tree.delete(*self.tree.get_children())
         for row in rows:
-            self.tree.insert("", "end", iid=str(row["id"]), values=("Lecture notes" if row["item_type"] == "Lecture" else row["item_type"], row["title"], row["authors"], row["year"], row["section"], row["subsection"], row["source"]))
+            self.tree.insert("", "end", iid=str(row["id"]), values=(row["created_at"] or "", "Lecture notes" if row["item_type"] == "Lecture" else row["item_type"], row["title"], row["authors"], row["year"], row["section"], row["subsection"], row["source"]))
         self.count_label.configure(text=f"{len(rows)} item{'s' if len(rows) != 1 else ''}")
 
     def update_entry_suggestions(self, *_args):
@@ -2787,7 +2883,7 @@ Describe the background and objectives of this report.
 
     def sync_csv(self):
         """Keep a spreadsheet-readable catalog synchronized automatically."""
-        columns = ("item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "lecture_pdf_paths", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer", "equation_pdf_path", "notes_pdf_path", "website", "place", "report_date")
+        columns = ("created_at", "item_type", "title", "authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords", "section", "subsection", "corresponding_author", "author_email", "file_link", "lecture_pdf_paths", "supplementary_paths", "bibtex_path", "image_paths", "notes_path", "notes", "equation_latex", "equation_renderer", "equation_pdf_path", "notes_pdf_path", "website", "place", "report_date")
         rows = self.conn.execute(f"SELECT {', '.join(columns)} FROM literature ORDER BY title").fetchall()
         try:
             temporary = AUTO_CSV_PATH + ".tmp"
@@ -3166,6 +3262,8 @@ Describe the background and objectives of this report.
                 self._backup_close_after = True
                 self.cancel_backup()
             return
+        self._remember_backup_paths()
+        self._closing = True
         for job in (getattr(self, "_backup_poll_job", None), getattr(self, "_backup_size_job", None)):
             if job is not None:
                 self.after_cancel(job)
