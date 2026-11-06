@@ -56,7 +56,7 @@ ITEM_TYPE_LABELS = {"Lecture": "Lecture notes", "Note": "Notes"}
 PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Image", "Equation")
 
 
-APP_VERSION = "1.0.22"
+APP_VERSION = "1.0.23"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -239,6 +239,19 @@ Choose Notes beside Paper and Book for standalone notes. Enter a title,
 section, and subsection, then add plain text, LaTeX code, photos, or any
 combination of these. Add keywords if useful, then click Add or Update.
 Use the Notes type filter and Open / View to find and open saved notes.
+"""
+
+
+SETUP_README += """
+
+ONEDRIVE FOLDER NAMES
+
+Organize Files repairs incompatible folder names inside NMR_Library and
+updates saved attachment links. Forbidden characters become underscores;
+leading/trailing spaces, trailing periods, and leading double periods are
+removed. Name collisions receive a numbered suffix. The entry titles and
+the contents of renamed folders are preserved. The completion message
+reports how many folders were renamed and any missing attachment references.
 """
 
 
@@ -2210,15 +2223,29 @@ Describe the background and objectives of this report.
                                       (*updates.values(), row["id"]))
 
     @staticmethod
-    def safe_name(value, fallback):
-        value = unicodedata.normalize("NFC", value or "")
-        value = re.sub(r"[^\w .()-]+", "_", value, flags=re.UNICODE).strip(" ._")
-        value = value[:120] or fallback
-        reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
-                    *(f"LPT{i}" for i in range(1, 10))}
-        if value.split(".", 1)[0].upper() in reserved:
+    def sync_folder_name(value, fallback="Folder"):
+        """Clean a final folder component for OneDrive and Windows."""
+        value = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", value)
+        value = re.sub(r"[.\s]+$", "", value.lstrip())
+        if value.startswith(".."):
+            value = re.sub(r"^[.\s]+", "", value)
+        value = re.sub(r"_vti_", "_vti-", value, flags=re.IGNORECASE)
+        if value.startswith("~$"):
+            value = "_" + value[2:]
+        if value.startswith(("゛", "ဧ")):
+            value = "_" + value
+        value = value or fallback
+        reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(10)),
+                    *(f"LPT{i}" for i in range(10))}
+        if value.split(".", 1)[0].rstrip().upper() in reserved or value.lower() in (".lock", "desktop.ini"):
             value = "_" + value
         return value
+
+    @staticmethod
+    def safe_name(value, fallback, limit=120):
+        value = unicodedata.normalize("NFC", value or "")
+        value = re.sub(r"[^\w .()-]+", "_", value, flags=re.UNICODE).strip(" ._")
+        return NMRCatalog.sync_folder_name(value[:limit], fallback)
 
     def ensure_category_folders(self):
         # Entry folders are created when needed; do not recreate empty categories.
@@ -2366,13 +2393,13 @@ Describe the background and objectives of this report.
         )
 
     def entry_folder_for(self, section, subsection, author, title, item_type="Paper"):
-        author = self.safe_name(author, "Unknown author")[:40]
-        title = self.safe_name(title, "Untitled")[:70]
+        author = self.safe_name(author, "Unknown author", 40)
+        title = self.safe_name(title, "Untitled", 70)
         return os.path.join(
             self.library_root(), CATEGORY_FOLDERS.get(item_type, "Papers"),
-            self.safe_name(section, "Unclassified")[:45],
-            self.safe_name(subsection, "General")[:45],
-            f"{author}-{title}",
+            self.safe_name(section, "Unclassified", 45),
+            self.safe_name(subsection, "General", 45),
+            self.sync_folder_name(f"{author}-{title}"),
         )
 
     def write_notes_file(self, notes, section=None, subsection=None, author=None, title=None, item_type="Paper"):
@@ -2440,14 +2467,100 @@ Describe the background and objectives of this report.
                 data.get("title"), data.get("item_type"))
         return data
 
+    def repair_library_folder_names(self, attachment_columns):
+        """Rename incompatible folders in place and repair their catalog references."""
+        root = self.library_root()
+
+        def literal_path(path):
+            # Win32 normally strips trailing dots/spaces from path components.
+            if os.name != "nt" or path.startswith("\\\\?\\"):
+                return path
+            if not os.path.isabs(path):
+                path = os.path.abspath(path)
+            return "\\\\?\\UNC\\" + path[2:] if path.startswith("\\\\") else "\\\\?\\" + path
+
+        def is_link(path):
+            path = literal_path(path)
+            return os.path.islink(path) or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+
+        if is_link(root):
+            raise OSError("Folder repair is unavailable when NMR_Library is a symbolic link or junction.")
+        renamed = []
+
+        def raise_walk_error(error):
+            raise error
+
+        def remap(path):
+            if not path or path.startswith(("https://", "http://")):
+                return path
+            # Try the literal path first for old Linux folder names containing backslashes.
+            literal = os.path.normpath(os.path.join(APP_DIRECTORY, os.path.expanduser(path)))
+            for original in (literal, self.resolve_stored_path(path)):
+                updated = original
+                for old, new in renamed:
+                    if path_is_inside(updated, old):
+                        updated = os.path.join(new, os.path.relpath(updated, old))
+                if updated != original:
+                    return self.portable_stored_path(updated)
+            return path
+
+        try:
+            for parent, directories, files in os.walk(root, topdown=True, onerror=raise_walk_error):
+                occupied = {name.casefold() for name in directories + files}
+                children = []
+                for name in sorted(directories):
+                    old = os.path.join(parent, name)
+                    if is_link(old) or os.path.ismount(old):
+                        continue
+                    clean = self.sync_folder_name(name)
+                    if clean != name:
+                        candidate = clean
+                        counter = 2
+                        while candidate.casefold() in occupied:
+                            candidate = f"{clean}_{counter}"
+                            counter += 1
+                        new = os.path.join(parent, candidate)
+                        os.rename(literal_path(old), literal_path(new))
+                        renamed.append((old, new))
+                        occupied.add(candidate.casefold())
+                        name = candidate
+                    children.append(name)
+                directories[:] = children
+            if renamed:
+                with self.conn:
+                    for row in self.conn.execute("SELECT * FROM literature").fetchall():
+                        updates = {}
+                        notes, latex = row["notes"] or "", row["equation_latex"] or ""
+                        for key in attachment_columns:
+                            before = row[key] or ""
+                            paths = before.split("; ") if key in ("lecture_pdf_paths", "supplementary_paths", "image_paths") else [before]
+                            mapped = [remap(path) for path in paths]
+                            after = "; ".join(mapped)
+                            if before != after:
+                                updates[key] = after
+                                for old, new in zip(paths, mapped):
+                                    if old and old != new:
+                                        notes = notes.replace(old, new)
+                                        latex = latex.replace(old, new)
+                        if updates:
+                            updates.update(notes=notes, equation_latex=latex)
+                            self.conn.execute("UPDATE literature SET " + ", ".join(f"{key}=?" for key in updates) + " WHERE id=?",
+                                              (*updates.values(), row["id"]))
+        except Exception:
+            for old, new in reversed(renamed):
+                os.rename(literal_path(new), literal_path(old))
+            raise
+        return len(renamed)
+
     def organize_existing_files(self):
         """Reorganize stored attachments and persist their new paths together."""
         try:
             self.ensure_category_folders()
+            columns = ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path", "notes_pdf_path")
+            repaired = self.repair_library_folder_names(columns)
             rows = self.conn.execute("SELECT * FROM literature").fetchall()
             changed = 0
             missing = 0
-            columns = ("file_link", "lecture_pdf_paths", "bibtex_path", "supplementary_paths", "image_paths", "notes_path", "equation_pdf_path", "notes_pdf_path")
             with self.conn:
                 for row in rows:
                     for key in columns:
@@ -2455,16 +2568,18 @@ Describe the background and objectives of this report.
                         missing += sum(bool(path) and not path.startswith(("https://", "http://"))
                                        and not os.path.isfile(self.resolve_stored_path(path)) for path in paths)
                     data = self.organize_entry_data(dict(row))
-                    self.conn.execute("UPDATE literature SET " + ", ".join(f"{key}=?" for key in columns) + " WHERE id=?",
-                                      (*[data[key] for key in columns], row["id"]))
+                    updated_columns = (*columns, "notes", "equation_latex")
+                    self.conn.execute("UPDATE literature SET " + ", ".join(f"{key}=?" for key in updated_columns) + " WHERE id=?",
+                                      (*[data[key] for key in updated_columns], row["id"]))
                     changed += 1
             self.sync_csv()
             self.clear_form()
             self.refresh_table()
             messagebox.showinfo(APP_TITLE, f"Organized {changed} entries into category / section / subsection / corresponding author-title.\n"
-                                f"Original files were kept. Missing file references: {missing}.")
+                                f"Renamed {repaired} folders for OneDrive compatibility. No files were deleted.\n"
+                                f"Missing file references: {missing}.")
         except (OSError, sqlite3.Error) as error:
-            messagebox.showerror(APP_TITLE, f"Could not finish organizing files. Original files were kept.\n{error}")
+            messagebox.showerror(APP_TITLE, f"Could not finish organizing files.\n{error}")
 
     def store_document(self, source, kind="Document"):
         source = os.path.abspath(os.path.expanduser(source))
