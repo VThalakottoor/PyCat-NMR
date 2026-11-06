@@ -1,12 +1,18 @@
-# PyCat NMR v1.0.21
+# PyCat NMR v1.0.22
 
 **Python Catalog for NMR**  
 **Author:** Vineeth Francis Thalakottoor  
 **Contact:** vineeth.thalakottoor@cea.fr
 
-PyCat is a local desktop catalog for papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites. It uses Python, Tkinter, and SQLite.
+PyCat is a local desktop catalog for papers, books, notes, manuals, theses, lecture notes, conferences, reports, researchers, and websites. It uses Python, Tkinter, and SQLite.
 
-This update uses the uploaded **v1.0.20** program as its base. It adds search reset, visible backup-mode buttons, and entry creation dates. Existing backup folder history, website links, attachments, and citation features are retained.
+This release adds Keywords and Photos / images to every entry type and makes Notes selectable alongside Paper and Book.
+
+## New in v1.0.22
+
+**Keywords** and **Photos / images** are available for every entry type, including Websites, Researchers, Lecture notes, and Conferences. Use **Images…**, drag and drop, or **Copy from clipboard** to attach photos. The attachments are saved with the entry and can be opened through **Open Images** in Search Library. Use **Keywords** or **All fields** in the search selector to find saved keywords.
+
+Choose **Notes** beside Paper and Book in Upload / Edit. Enter a title, section, and subsection, then add any combination of **Plain text**, **LaTeX code**, and photos. At least one of those three is required. Keywords are optional. Click **Add** or **Update** to save. **Open / View** opens the note editor, and **Open Images** opens its photos. The **Notes** type filter finds these entries, including older entries already saved as Note. Notes and Lecture notes remain separate types.
 
 ## New in v1.0.21
 

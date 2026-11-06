@@ -51,11 +51,12 @@ CATEGORY_FOLDERS = {
     "Note": "Notes", "Image": "Images", "Equation": "Equations", "Lecture": "Lectures", "Conference": "Conferences", "Report": "Reports", "Researchers": "Researchers", "Websites": "Websites",
 }
 
-ITEM_TYPES = ("Paper", "Book", "Manual", "Thesis", "Lecture", "Conference", "Report", "Researchers", "Websites")
-PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Note", "Image", "Equation")
+ITEM_TYPES = ("Paper", "Book", "Note", "Manual", "Thesis", "Lecture", "Conference", "Report", "Researchers", "Websites")
+ITEM_TYPE_LABELS = {"Lecture": "Lecture notes", "Note": "Notes"}
+PDF_TYPES = tuple(kind for kind in ITEM_TYPES if kind not in ("Researchers", "Websites")) + ("Image", "Equation")
 
 
-APP_VERSION = "1.0.21"
+APP_VERSION = "1.0.22"
 APP_TITLE = f"PyCat NMR v{APP_VERSION}"
 APP_SUBTITLE = "Python Catalog for NMR"
 __author__ = "Vineeth Francis Thalakottoor"
@@ -223,6 +224,21 @@ The automatic CSV includes created_at as its first column.
 
 Backup mode now uses two visible buttons: Backup and Mirror. Backup path
 history remains available in the source/destination dropdowns across restarts.
+"""
+
+
+SETUP_README += """
+
+KEYWORDS, PHOTOS, AND NOTES
+
+All entry types support Keywords and Photos / images. Use Images…, drag
+and drop, or Copy from clipboard to attach photos. Use Open Images in
+Search Library to open them. Keywords are searchable in Keywords or All fields.
+
+Choose Notes beside Paper and Book for standalone notes. Enter a title,
+section, and subsection, then add plain text, LaTeX code, photos, or any
+combination of these. Add keywords if useful, then click Add or Update.
+Use the Notes type filter and Open / View to find and open saved notes.
 """
 
 
@@ -528,7 +544,7 @@ class NMRCatalog(CatalogWindow):
         ttk.Combobox(
             search_frame,
             textvariable=self.filter_var,
-            values=("All", *("Lecture notes" if kind == "Lecture" else kind for kind in ITEM_TYPES)),
+            values=("All", *(ITEM_TYPE_LABELS.get(kind, kind) for kind in ITEM_TYPES)),
             state="readonly",
             width=10,
         ).grid(row=0, column=3, padx=(6, 0))
@@ -583,7 +599,7 @@ class NMRCatalog(CatalogWindow):
         form_canvas.bind("<Configure>", lambda e: form_canvas.itemconfigure(form_window, width=e.width))
         self.equation_panel = ttk.LabelFrame(editor, text="Notes and rendered PDF — up to 100 A4 pages", padding=12)
         editor.add(self.equation_panel, weight=2)
-        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, manuals, theses, lecture notes, conferences, reports, researchers, and websites", padding=8)
+        table_frame = ttk.LabelFrame(search_tab, text="Papers, books, notes, manuals, theses, lecture notes, conferences, reports, researchers, and websites", padding=8)
         table_frame.pack(fill="both", expand=True)
 
         self.fields = {}
@@ -599,7 +615,7 @@ class NMRCatalog(CatalogWindow):
             ("source", "Journal / Publisher / University", None),
             ("volume_issue_pages", "Volume, issue, pages", None),
             ("doi_isbn", "DOI / ISBN", None),
-            ("keywords", "NMR keywords", None),
+            ("keywords", "Keywords", None),
             ("section", "Section / Field *", None),
             ("subsection", "Subsection *", None),
             ("corresponding_author", "Corresponding author", None),
@@ -608,7 +624,7 @@ class NMRCatalog(CatalogWindow):
             ("lecture_pdf_paths", "Lecture PDFs", None),
             ("supplementary_paths", "Supplementary files", None),
             ("bibtex_path", "BibTeX / RIS attachment", None),
-            ("image_paths", "Images", None),
+            ("image_paths", "Photos / images", None),
             ("website", "Website", None),
             ("place", "Conference place", None),
             ("report_date", "Date (YYYY-MM-DD)", None),
@@ -624,7 +640,7 @@ class NMRCatalog(CatalogWindow):
             if key == "item_type":
                 widget = ttk.Frame(form)
                 for index, choice in enumerate(choices):
-                    ttk.Radiobutton(widget, text="Lecture notes" if choice == "Lecture" else choice, variable=var, value=choice).grid(
+                    ttk.Radiobutton(widget, text=ITEM_TYPE_LABELS.get(choice, choice), variable=var, value=choice).grid(
                         row=index // 4, column=index % 4, sticky="w", padx=(0, 12), pady=2)
             elif key in ("section", "subsection"):
                 widget = ttk.Combobox(form, textvariable=var, state="normal",
@@ -1522,18 +1538,15 @@ Describe the background and objectives of this report.
     def update_type_controls(self, *_args):
         self._preview_generation += 1
         kind = self.fields["item_type"].get()
-        common = {"item_type", "title", "section", "subsection"}
-        literature = {"authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+        common = {"item_type", "title", "section", "subsection", "keywords", "image_paths"}
+        literature = {"authors", "year", "source", "volume_issue_pages", "doi_isbn",
                       "corresponding_author", "author_email", "file_link", "supplementary_paths",
-                      "bibtex_path", "image_paths"}
+                      "bibtex_path"}
         visible = common | ({"authors", "lecture_pdf_paths"} if kind == "Lecture" else
                             {"website", "place", "file_link"} if kind == "Conference" else
-                            {"authors", "report_date", "image_paths", "file_link"} if kind == "Report" else
-                            {"image_paths"} if kind == "Image" else
+                            {"authors", "report_date", "file_link"} if kind == "Report" else
                             literature if kind in ("Paper", "Book", "Manual", "Thesis") else set())
-        if kind == "Researchers":
-            visible = {"item_type", "title", "website", "section", "subsection"}
-        elif kind == "Websites":
+        if kind in ("Researchers", "Websites"):
             visible = common | {"website"}
         self.field_labels["website"].configure(text="Websites (one per line)" if kind == "Websites" else "Website")
         for key, widget in self.field_widgets.items():
@@ -1566,6 +1579,9 @@ Describe the background and objectives of this report.
             self.workspace_tabs.tab(0, text="LaTeX")
             self.note_actions.pack(fill="x")
             self.equation_panel.configure(text="Notes and rendered PDF — up to 100 A4 pages")
+            if kind == "Note":
+                self.document_tabs.select(self.plain_source_tab)
+                self.workspace_tabs.select(0)
         equation_enabled = True
         equation_pane = str(self.equation_panel)
         if equation_enabled and equation_pane not in self.editor.panes():
@@ -1807,12 +1823,12 @@ Describe the background and objectives of this report.
         values = {name: variable.get().strip() for name, variable in self.fields.items()}
         kind = values["item_type"]
         if kind == "Lecture":
-            for key in ("year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+            for key in ("year", "source", "volume_issue_pages", "doi_isbn",
                         "corresponding_author", "author_email", "file_link", "supplementary_paths",
                         "bibtex_path"):
                 values[key] = ""
         elif kind in ("Note", "Image", "Equation"):
-            for key in ("authors", "year", "source", "volume_issue_pages", "doi_isbn", "keywords",
+            for key in ("authors", "year", "source", "volume_issue_pages", "doi_isbn",
                         "corresponding_author", "author_email", "supplementary_paths", "bibtex_path"):
                 values[key] = ""
             if kind != "Image":
@@ -1823,8 +1839,7 @@ Describe the background and objectives of this report.
         values["equation_renderer"] = self.renderer_var.get()
         values["notes"] = self.notes.get("1.0", "end").strip()
         if kind in ("Researchers", "Websites"):
-            keep = {"item_type", "title", "notes", "section", "subsection"}
-            keep.add("website")
+            keep = {"item_type", "title", "notes", "section", "subsection", "website", "keywords", "image_paths"}
             for key in values:
                 if key not in keep:
                     values[key] = ""
@@ -1856,8 +1871,8 @@ Describe the background and objectives of this report.
         if data["item_type"] == "Equation" and not data["equation_latex"]:
             messagebox.showwarning(APP_TITLE, "Please enter a LaTeX equation.")
             return False
-        if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"]):
-            messagebox.showwarning(APP_TITLE, "Please enter a note or an equation.")
+        if data["item_type"] == "Note" and not (data["notes"] or data["equation_latex"] or data["image_paths"]):
+            messagebox.showwarning(APP_TITLE, "Add plain text, LaTeX code, or a photo to this note.")
             return False
         if data["item_type"] == "Image" and not (data["file_link"] or data["image_paths"]):
             messagebox.showwarning(APP_TITLE, "Please select an image using Images…")
@@ -1949,8 +1964,7 @@ Describe the background and objectives of this report.
         self.update_filter_dropdowns()
         query = self.search_var.get().strip()
         item_filter = self.filter_var.get()
-        if item_filter == "Lecture notes":
-            item_filter = "Lecture"
+        item_filter = next((kind for kind, label in ITEM_TYPE_LABELS.items() if label == item_filter), item_filter)
         sql = "SELECT * FROM literature WHERE 1=1"
         parameters = []
         words = list(dict.fromkeys(normalize_search_text(query).split()))
@@ -1981,7 +1995,7 @@ Describe the background and objectives of this report.
         rows = self.conn.execute(sql, parameters).fetchall()
         self.tree.delete(*self.tree.get_children())
         for row in rows:
-            self.tree.insert("", "end", iid=str(row["id"]), values=(row["created_at"] or "", "Lecture notes" if row["item_type"] == "Lecture" else row["item_type"], row["title"], row["authors"], row["year"], row["section"], row["subsection"], row["source"]))
+            self.tree.insert("", "end", iid=str(row["id"]), values=(row["created_at"] or "", ITEM_TYPE_LABELS.get(row["item_type"], row["item_type"]), row["title"], row["authors"], row["year"], row["section"], row["subsection"], row["source"]))
         self.count_label.configure(text=f"{len(rows)} item{'s' if len(rows) != 1 else ''}")
 
     def update_entry_suggestions(self, *_args):
@@ -2736,11 +2750,17 @@ Describe the background and objectives of this report.
         return "break"
 
     def open_selected_file(self):
-        if self.fields["item_type"].get() == "Websites":
+        if self.fields["item_type"].get() in ("Websites", "Note"):
             self.tabs.select(1)
-            self.document_tabs.select(self.plain_source_tab)
             self.workspace_tabs.select(0)
-            self.notes.focus_set()
+            if (self.fields["item_type"].get() == "Note"
+                    and not self.notes.get("1.0", "end-1c").strip()
+                    and self.equation_text.get("1.0", "end-1c").strip()):
+                self.document_tabs.select(self.latex_source_tab)
+                self.equation_text.focus_set()
+            else:
+                self.document_tabs.select(self.plain_source_tab)
+                self.notes.focus_set()
             return
         if self.fields["item_type"].get() == "Lecture":
             paths = [self.resolve_stored_path(p) for p in self.fields["lecture_pdf_paths"].get().split("; ") if p]
@@ -2767,7 +2787,7 @@ Describe the background and objectives of this report.
             ttk.Button(dialog, text="Open selected PDF", command=open_chosen).pack(pady=(0, 12))
             files.bind("<Double-1>", open_chosen)
             return
-        if self.fields["item_type"].get() in ("Equation", "Note"):
+        if self.fields["item_type"].get() == "Equation":
             self.tabs.select(1)
             self.preview_equation(compile_full=True)
             self.equation_text.focus_set()
