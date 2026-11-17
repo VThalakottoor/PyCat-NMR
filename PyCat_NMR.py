@@ -2,11 +2,9 @@ r"""PyCat NMR — Python Catalog for NMR papers, books, manuals, theses, notes, 
 
 Author: Vineeth Francis Thalakottoor (vineeth.thalakottoor@cea.fr)
 
-Run with: python PyCat_NMR.py
-Equation previews require: python -m pip install matplotlib
+Run with Run_PyCat.bat on Windows or bash Run_PyCat.sh on Linux.
+For manual setup, install requirements.txt in your Python environment.
 Quick preview uses Matplotlib MathText. Full LaTeX uses pdflatex + pdftoppm.
-Ubuntu/Debian: sudo apt install texlive-latex-base texlive-latex-recommended texlive-latex-extra poppler-utils
-Full LaTeX image conversion requires Pillow: python -m pip install pillow
 Enter one equation per line, optionally wrapped in $...$, $$...$$, \[...\], or \(...\).
 The SQLite database and NMR_Library are created beside this script.
 Catalog attachment paths are stored relative to this folder so the complete
@@ -67,66 +65,38 @@ AUTO_CSV_PATH = os.path.join(APP_DIRECTORY, "PyCat_NMR_Catalog.csv")
 
 SETUP_README = r"""PyCat NMR — Setup and use
 
-Keep PyCat_NMR.py, nmr_catalog.db, PyCat_NMR_Catalog.csv, and NMR_Library together.
-Install Python 3 before creating an environment. Internet access is required to
-download packages; the catalog works offline after setup.
+Keep PyCat_NMR.py, requirements.txt, and the launcher in the same folder.
+If you already have a catalog, keep nmr_catalog.db, PyCat_NMR_Catalog.csv,
+and NMR_Library beside the app.
 
-WINDOWS — COMMAND PROMPT (CMD)
+WINDOWS
 
-Create the environment once:
+Install Python 3.9 or newer with Tcl/Tk support. Double-click Run_PyCat.bat.
 
-    py -m venv "%USERPROFILE%\venvs\pycat"
+LINUX — UBUNTU / DEBIAN
 
-Activate it in each new CMD window:
+Install Python 3.9 or newer with venv and Tkinter support. With the system
+Python, install the prerequisites from a terminal:
 
-    call "%USERPROFILE%\venvs\pycat\Scripts\activate.bat"
-
-Install packages after activation:
-
-    python -m pip install --upgrade pip
-    python -m pip install --upgrade matplotlib pillow tkinterdnd2
-
-Go to your PyCat folder (replace this example with your actual path) and run:
-
-    cd /d "C:\path\to\PyCat"
-    python PyCat_NMR.py
-
-Leave the environment when finished:
-
-    deactivate
-
-These commands are for CMD. Windows Python should include Tcl/Tk support.
-
-LINUX — TERMINAL (UBUNTU / DEBIAN)
-
-Install the system prerequisites once:
-
-    sudo apt update
     sudo apt install python3 python3-venv python3-tk
 
-Create the environment once:
+Open a terminal in the PyCat folder and run:
 
-    python3 -m venv ~/venvs/pycat
-
-Activate it in each new terminal:
-
-    source ~/venvs/pycat/bin/activate
-
-Install packages after activation:
-
-    python -m pip install --upgrade pip
-    python -m pip install --upgrade matplotlib pillow tkinterdnd2
-
-Go to your PyCat folder (replace this example with your actual path) and run:
-
-    cd "/path/to/PyCat"
-    python PyCat_NMR.py
-
-Leave the environment when finished:
-
-    deactivate
+    bash Run_PyCat.sh
 
 Other Linux distributions use their own package manager for system prerequisites.
+
+FIRST RUN
+
+The launcher reuses your PyCat environment or creates it in your home
+directory under venv/pycat. It installs the packages in requirements.txt
+on the first run and when the file changes. Setup may need internet access.
+You can launch offline after setup.
+
+To run the package installation again, use one of these commands:
+
+    Run_PyCat.bat --install
+    bash Run_PyCat.sh --install
 
 IMAGES — COPY FROM CLIPBOARD
 

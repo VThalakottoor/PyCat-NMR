@@ -1,0 +1,5 @@
+# Install with python -m pip install -r requirements.txt.
+# Tkinter comes from the Python installation or the system package manager.
+matplotlib
+Pillow
+tkinterdnd2
